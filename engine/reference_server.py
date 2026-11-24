@@ -55,7 +55,7 @@ for source in (slide['sources']['items'], slide['chart']['properties']['dataRef'
     source['required'] = ['file_id' if field == 'file' else field for field in source['required']]
 tool('reference_deck_compose', 'Create an editable 16:9 PowerPoint from this chat workspace. Same plan as SlidePilot deck_compose, but sources/dataRef/image use file_id, not file paths. '
      'Use source {file_id,locator,quote,expected_revision?}; chart.dataRef {file_id,category,series:[{column,name?}],sheet?,headerRow?,lastRow?,expected_revision?}; image {file_id,alt}. '
-     'One chart/table/image per slide; concise titles/body. Reads pinned references, validates Office 2010 format, requests normal PowerPoint approval and retains a visible chat copy. '
+     'One chart/table/image per slide; PNG/JPEG images; concise titles/body. Reads pinned references, validates Office 2010 format, requests normal PowerPoint approval and retains a visible chat copy. '
      'Existing filenames/sources are never overwritten. Returned file is the host-relative path for live_insert_draft; returned file_id is for this workspace.',
      {**W, 'filename': S, 'plan': REFERENCE_PLAN}, ['workspace_id', 'filename', 'plan'], True)
 tool('reference_deck_inspect', 'Inspect the generated/reference PPTX text, shapes and embedded-chart relationships using its workspace file_id.',

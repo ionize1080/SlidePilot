@@ -297,9 +297,17 @@ def units(path):
     if ext in {'.csv', '.tsv'}:
         import csv
         with path.open('rb') as file:
-            content = decode(file.read())
-        for index, row in enumerate(csv.reader(io.StringIO(content), delimiter='\t' if ext == '.tsv' else ','), 1):
-            yield f'row {index}', ' | '.join(row)
+            sample = file.read(4096)
+        encoding = 'utf-16' if sample.startswith((b'\xff\xfe', b'\xfe\xff')) else 'utf-8-sig'
+        if encoding != 'utf-16':
+            try:
+                __import__('codecs').getincrementaldecoder('utf-8-sig')().decode(sample, final=False)
+            except UnicodeError:
+                encoding = 'gb18030'
+        csv.field_size_limit(16 * 1024 * 1024)
+        with path.open(encoding=encoding, newline='') as file:
+            for index, row in enumerate(csv.reader(file, delimiter='\t' if ext == '.tsv' else ','), 1):
+                yield f'row {index}', ' | '.join(row)
         return
     if ext in TEXT:
         with path.open('rb') as file:
