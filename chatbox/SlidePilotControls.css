@@ -1,0 +1,15 @@
+.sp-chat-controls{display:inline-flex;align-items:center;gap:4px;align-self:center;min-height:32px;-webkit-app-region:no-drag;color:#62716f}
+#slidepilot-toolbar-slot{display:inline-flex;align-items:center}
+.sp-chat-controls button.sp-approval-switch,.sp-chat-controls button.sp-chat-settings{border:1px solid transparent;background:transparent;border-radius:9px;min-height:32px;min-width:32px;padding:5px;display:inline-flex;align-items:center;justify-content:center;gap:4px;color:inherit;cursor:pointer;transition:background .14s,color .14s}
+.sp-chat-controls button:hover{background:#00756e0d;color:#00756e}
+.sp-chat-controls button:focus-visible{outline:2px solid #00756e;outline-offset:2px}
+.sp-chat-controls button:disabled{opacity:.45;cursor:wait}
+.sp-chat-controls button.is-automatic{border-color:#c43d4b30;background:#c43d4b0d;color:#be3445}
+.sp-chat-controls button.is-automatic:hover{background:#c43d4b1a;color:#a92939}
+.sp-approval-switch span{font-size:11px;line-height:1;font-weight:600;padding-right:3px;white-space:nowrap}
+.sp-control-error{font-size:11px;color:#be3445;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+[data-mantine-color-scheme=dark] .sp-chat-controls{color:#a6bbb7}
+[data-mantine-color-scheme=dark] .sp-chat-controls button:hover{background:#6fe0c511;color:#8ae0c8}
+[data-mantine-color-scheme=dark] .sp-chat-controls button.is-automatic{color:#ff9aa7;border-color:#ff9aa740;background:#ff9aa710}
+@media(prefers-reduced-motion:reduce){.sp-chat-controls button{transition:none!important}}
+@media(prefers-contrast:more){.sp-chat-controls button{border-color:currentColor!important}.sp-chat-controls button:focus-visible{outline-color:currentColor}}

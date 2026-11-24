@@ -1,5 +1,3 @@
 @echo off
-"%~dp0SlidePilot.Manager.exe" disable
-set "SlidePilotExit=%errorlevel%"
-if not "%SlidePilotExit%"=="0" pause
-exit /b %SlidePilotExit%
+call "%~dp0Setup.cmd"
+exit /b %errorlevel%

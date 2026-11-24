@@ -8,7 +8,12 @@ using System.Text.RegularExpressions;
 namespace SlidePilot {
     internal static class Live {
         static int Num(Dictionary<string,object> d,string k,int fallback) {return d.ContainsKey(k)?Convert.ToInt32(d[k],CultureInfo.InvariantCulture):fallback;}
-        static float Pos(Dictionary<string,object> d,string k,float fallback) {return d.ContainsKey(k)?Convert.ToSingle(d[k],CultureInfo.InvariantCulture):fallback;}
+        static float Pos(Dictionary<string,object> d,string k,float fallback) {
+            float value=d.ContainsKey(k)?Convert.ToSingle(d[k],CultureInfo.InvariantCulture):fallback;
+            if(Single.IsNaN(value) || Single.IsInfinity(value)) throw new ArgumentException("Use a finite "+k+" value.");
+            if((k=="width" || k=="height" || k=="size") && value<=0) throw new ArgumentException(k+" must be greater than zero.");
+            return value;
+        }
         static string Str(Dictionary<string,object> d,string k,string fallback="") {return d.ContainsKey(k)?Convert.ToString(d[k],CultureInfo.InvariantCulture):fallback;}
         static List<object> Items(object value) {var list=new List<object>();foreach(var item in (IEnumerable)value) list.Add(item);return list;}
         public static string Draft(string workspace,string name,bool create) {
@@ -75,6 +80,7 @@ namespace SlidePilot {
                         string s=(string)cell; if(s.Length>32000) throw new ArgumentException("Cell text is too long.");
                         if(s.Length>0 && "=+-@\t\r".IndexOf(s[0])>=0) cell="'"+s;
                     } else if(cell!=null && !(cell is int) && !(cell is double) && !(cell is long) && !(cell is decimal) && !(cell is bool)) throw new ArgumentException("Scalar data cells required.");
+                    if(cell is double && (Double.IsNaN((double)cell) || Double.IsInfinity((double)cell))) throw new ArgumentException("Chart values must be finite numbers.");
                     values[i,j]=cell;
                 }
             }

@@ -1,6 +1,7 @@
 """SlidePilot MCP server. UTF-8, newline-framed JSON-RPC over inherited stdio only."""
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -67,6 +68,7 @@ def validate_input(value,schema,where="arguments"):
     types={"object":dict,"array":list,"string":str,"integer":int,"number":(float,int),"boolean":bool,"null":type(None)}
     want=typ if isinstance(typ,list) else [typ]
     if not any(isinstance(value,types[t]) and (type(value) is not bool or t=="boolean") for t in want): raise ValueError(where+": expected "+str(typ))
+    if isinstance(value,float) and not math.isfinite(value):raise ValueError(where+": expected a finite number")
     if "enum" in schema and value not in schema["enum"]:raise ValueError(where+": unexpected choice")
     if isinstance(value,dict):
         fields=schema.get("properties",{})
@@ -168,18 +170,26 @@ class Service:
 
 
 def response(service,msg):
-    if not isinstance(msg,dict) or msg.get("jsonrpc")!="2.0" or "method" not in msg:
+    if (not isinstance(msg,dict) or msg.get("jsonrpc")!="2.0" or not isinstance(msg.get("method"),str)
+            or ("id" in msg and not (msg["id"] is None or type(msg["id"]) in (str,int,float)))
+            or (isinstance(msg.get("id"),float) and not math.isfinite(msg["id"]))):
         return {"jsonrpc":"2.0","id":None,"error":{"code":-32600,"message":"Invalid Request"}}
     if "id" not in msg:return None
     req={"jsonrpc":"2.0","id":msg["id"]}
     method=msg["method"];params=msg.get("params",{})
+    # MCP named parameters must be an object. A malformed client frame must not
+    # terminate the stdio process and strand the next otherwise valid request.
+    if not isinstance(params,dict):
+        return {**req,"error":{"code":-32602,"message":"Parameters must be an object"}}
     if method=="initialize":
         version=params.get("protocolVersion")
         result={"protocolVersion":version if version in VERSIONS else VERSIONS[0],"capabilities":{"tools":{"listChanged":False}},
-                "serverInfo":{"name":"SlidePilot","version":"0.1.0-rc.1"},"instructions":GUIDES["workflow"]}
+                "serverInfo":{"name":"SlidePilot","version":"0.1.0-rc.2"},"instructions":GUIDES["workflow"]}
     elif method=="ping":result={}
     elif method=="tools/list":result={"tools":list(TOOLS.values())}
     elif method=="tools/call":
+        if not isinstance(params.get("name"),str) or not isinstance(params.get("arguments",{}),dict):
+            return {**req,"error":{"code":-32602,"message":"Use a tool name and an arguments object"}}
         try:
             result={"content":[{"type":"text","text":json.dumps(service.call(params["name"],params.get("arguments",{})),ensure_ascii=False,separators=(",",":"))}]}
         except Exception as e:result={"isError":True,"content":[{"type":"text","text":str(e)[:2400]}]}

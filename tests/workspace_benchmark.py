@@ -16,7 +16,7 @@ from package_xml import NS, parse, relationships
 from chart_edit import part_for
 
 
-def run_model(complete, output, validator=None):
+def run_model(complete, output, validator=None, progress=None):
     validator=Path(validator or ROOT/".build/qa/Validate.exe").resolve(strict=True)
     output.mkdir(parents=True,exist_ok=True)
     run=Path(tempfile.mkdtemp(prefix="run-",dir=output)).resolve()
@@ -53,10 +53,18 @@ def run_model(complete, output, validator=None):
     calls=[]
     model_seconds=0.0
     begin=time.perf_counter()
-    for _ in range(15):
+    failure=None
+    if progress:
+        progress({"event":"benchmark-start","runDirectory":str(run)})
+    for turn in range(15):
         before=time.perf_counter()
-        msg=complete(messages,tools)
-        model_seconds+=time.perf_counter()-before
+        try:
+            msg=complete(messages,tools)
+        except (RuntimeError,ValueError,OSError) as exc:
+            failure=str(exc)
+            break
+        finally:
+            model_seconds+=time.perf_counter()-before
         messages.append({k:v for k,v in msg.items() if k in ("role","content","tool_calls","reasoning_content")})
         if not msg.get("tool_calls"):
             break
@@ -77,6 +85,8 @@ def run_model(complete, output, validator=None):
                 entry["ok"]=False
                 result={"error":str(exc)}
             calls.append(entry)
+            if progress:
+                progress({"event":"tool","turn":turn+1,**entry})
             messages.append({"role":"tool","tool_call_id":call["id"],"content":json.dumps(result,ensure_ascii=False)})
     path=root/"_SlidePilot/drafts/Harbour.pptx"
     checks={"draftCreated":path.is_file(),"bothSourcesRead":{"brief.md","deposits.csv"} <=
@@ -102,7 +112,10 @@ def run_model(complete, output, validator=None):
                     values=[[float(c.findtext("s:v",namespaces=NS)) for c in r if c.find("s:v",NS) is not None]
                             for r in sheet.findall("s:sheetData/s:row",NS)][1:]
                     checks["bothSeriesExact"]=values==[[100,82],[116,85],[128,91],[142,94]] or values==[[82,100],[85,116],[91,128],[94,142]]
-    report={"passed":all(checks.values()),"modelSeconds":round(model_seconds,3),
-            "totalSeconds":round(time.perf_counter()-begin,3),"checks":checks,"calls":calls}
+    report={"passed":not failure and all(checks.values()),"modelSeconds":round(model_seconds,3),
+            "totalSeconds":round(time.perf_counter()-begin,3),"checks":checks,"calls":calls,
+            "runDirectory":str(run)}
+    if failure:
+        report["error"]=failure
     (run/"result.json").write_text(json.dumps(report,indent=2),encoding="utf-8")
     return report

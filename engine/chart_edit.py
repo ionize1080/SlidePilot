@@ -60,6 +60,11 @@ def set_cells(parts,part,drawing,book_name,changes):
         wbparts={n:b.read(n) for n in b.namelist()}
         if parse(b.read("xl/workbook.xml")).find("s:sheets/s:sheet",NS).get("name")!="Data": raise ValueError("Cell edits require a SlidePilot Data sheet; use live_chart_data for other workbooks")
     sheetdata=sheet.find("s:sheetData",NS)
+    styles=parse(wbparts["xl/styles.xml"]) if "xl/styles.xml" in wbparts else None
+    formats={"0":"General"}
+    if styles is not None:
+        formats.update({n.get("numFmtId"):n.get("formatCode") for n in styles.findall("s:numFmts/s:numFmt",NS)})
+    xfs=styles.findall("s:cellXfs/s:xf",NS) if styles is not None else []
     def cindex(col):
         n=0
         for c in col:n=n*26+ord(c)-64
@@ -86,6 +91,12 @@ def set_cells(parts,part,drawing,book_name,changes):
         if cell is None:
             from xml.etree.ElementTree import Element
             cell=Element(q("s:c"),{"r":adr})
+            # Blank values are omitted from the embedded sheet. Filling a gap
+            # must retain the chart's percentage/currency format in Edit Data.
+            fmt=next((node.findtext("c:formatCode","General",NS) for node,_,is_num in cache[adr] if is_num),None)
+            if fmt and fmt!="General":
+                style=next((i for i,xf in enumerate(xfs) if formats.get(xf.get("numFmtId"))==fmt),None)
+                if style is not None:cell.set("s",str(style))
             ix=next((i for i,x in enumerate(row) if cindex(CELL.fullmatch(x.get("r"))[1])>cindex(m[1])),len(row))
             row.insert(ix,cell)
         for ch in list(cell):cell.remove(ch)

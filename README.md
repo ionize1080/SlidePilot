@@ -4,14 +4,13 @@ SlidePilot turns workspace files into editable PowerPoint slides. The assistant 
 
 ## 在 PowerPoint 中使用
 
-1. 完整解压 Windows x64 便携包到固定目录，关闭 PowerPoint 后运行 `Enable.cmd`。重新打开 PowerPoint，新建或打开一个演示文稿。
-2. 在 **SlidePilot → 选择工作区** 选取资料文件夹。包内的 `examples/workspace` 提供一份季度简报和一张 CSV，可直接试用。
-3. 点击 **AI 助手**。在 Chatbox 设置中配置模型及 API 密钥。预设使用千问 AI 平台 Token Plan 的 OpenAI 兼容端点和 `qwen3.8-flash`。密钥由用户在自己的电脑上配置。
-4. 例如，输入“读完工作区内的简报和存款表，做三页季度回顾。按季度画出两类存款，图表可编辑，每页把来源写入备注。说明试点的下一步。”
-5. 助手默认逐项请求写入批准。草稿保存在工作区的 `_SlidePilot/drafts`。如需加入当前文稿，可要求助手插入草稿。切换文稿或工作区会恢复逐次审批。直接修改当前文稿前会保存恢复副本。
-6. 在图表上点击右键，选择 **编辑数据 → 在 Excel 中编辑数据**，即可修改内嵌工作表。Excel 需安装在本机。原始资料后续更新时可重新生成草稿。
-
-`Status.cmd` 显示注册位置。移动安装目录前从原目录运行 `Disable.cmd`，移动后再启用。三个入口均使用随包的 .NET 管理器。部署无需管理员权限、PowerShell、Node 或另外安装 Python。设置位于 `%APPDATA%\SlidePilot`，恢复副本位于 `%LOCALAPPDATA%\SlidePilot\backups`。工作区草稿由用户保管。
+1. 将完整便携包解压到固定目录，保存并关闭 PowerPoint。双击 `Enable.cmd` 或 `SlidePilot.Setup.exe` 打开安装器，选择“仅当前用户”或“整台电脑（管理员）”，点击启用。整机安装的目录须让所有使用者都能读取。已有用户注册时，可以选择备份并替换旧注册。
+2. 在安装器中点击“启动并验证 PowerPoint”，然后打开一份演示文稿。安装器会等待该版本的功能区加载回执。SlidePilot 选项卡提供 **AI 助手** 和 **设置**。
+3. 在 **AI 助手 → Chatbox 设置 → 模型提供商 → OpenAI** 中填写密钥。在原生连接设置中使用 `https://token-plan.maas.qianwenaiapi.com/compatible-mode/v1` 和 `qwen3.8-flash`。模型列表旁的连接测试可以检查供应商响应。
+4. 在对话输入栏打开 **工作区**，加入包内示例目录 `examples/workspace`，或将自己的文件拖入浮层。独立文件、真实文件夹及虚拟文件夹可以混用。新聊天首次发送后保留本次添加的资料。移除资料引用会保留原文件。
+5. 可以输入“读取工作区里的简报和存款表，做三页季度回顾。按季度画出两类存款的可编辑图表，把来源写入每页备注，并说明试点的下一步。”批准写入后，在工作区中找到生成的演示文稿。右键图表选择 **编辑数据 → 在 Excel 中编辑数据** 可修改内嵌工作簿。
+6. 助手默认逐项请求写入批准。点击输入栏盾牌并完成两次确认，即可为当前演示文稿开启自动批准。红色盾牌表示已开启，再点一次恢复手动。切换演示文稿或重启 PowerPoint 后恢复手动。
+7. Ribbon **设置** 管理插件外观与工作区偏好。部署、停用、切换版本和回滚由安装器管理。个人资料与会话位于 `%APPDATA%\SlidePilot`，文稿恢复副本位于 `%LOCALAPPDATA%\SlidePilot\backups`。保留旧版本目录，方便回滚。
 
 ## 图表与资料支持
 
@@ -26,7 +25,7 @@ SlidePilot turns workspace files into editable PowerPoint slides. The assistant 
 
 ## Compatibility and transport
 
-The distribution targets 64-bit Windows 10 21H1 or later, with desktop PowerPoint 2010 or later and .NET Framework 4.8. The AnyCPU add-in registers per user in the applicable registry views, for 32- or 64-bit Office on x64 Windows. Chatbox invokes the bundled Python MCP server over stdio. The server communicates with the active PowerPoint process over a user-scoped Windows named pipe. Model calls use the configured provider endpoint.
+The distribution targets 64-bit Windows 10 21H1 or later, with desktop PowerPoint 2010 or later and .NET Framework 4.8. The AnyCPU add-in supports current-user and machine registration in the applicable registry views, for 32- or 64-bit Office on x64 Windows. Chatbox invokes the bundled Python MCP server over stdio. The server communicates with the active PowerPoint process over a user-scoped Windows named pipe. Model calls use the configured provider endpoint.
 
 SlidePilot has its own COM class, PowerPoint ribbon, profile, process binding and recovery directory. Local checks and their host coverage are described in `TESTING.md`.
 
@@ -43,4 +42,4 @@ The source ZIP includes the pinned Chatbox source. To build from it, pass `--arc
 
 ## MCP entry points
 
-Start with `capabilities`, `workspace_list` and `workspace_read`. Resolve source units, cite short exact quotes, call `deck_compose` once for the complete deck, and use `deck_inspect` to check the result. The `guide` tool documents the composition schema, host limits and editing examples. Numeric matrix values and native chart data remain editable in PowerPoint.
+Use the conversation workspace ID attached to the latest user message to discover and read references. Use `capabilities` to check the PowerPoint host. Resolve source units, cite short exact quotes, call `deck_compose` once for the complete deck, and use `deck_inspect` to check the result. The `guide` tool documents the composition schema, host limits and editing examples. Numeric matrix values and native chart data remain editable in PowerPoint.

@@ -26,6 +26,7 @@ namespace SlidePilot {
             return Invoke(current,m.Groups[1].Value,BindingFlags.GetProperty|BindingFlags.InvokeMethod,args);
         }
         static object Scalar(object value) {
+            if(value is double && (Double.IsNaN((double)value) || Double.IsInfinity((double)value))) throw new ArgumentException("A finite property value is required.");
             if(value==null || value is string || value is bool || value is int || value is long || value is double || value is decimal) return value;
             throw new ArgumentException("A scalar property value is required.");
         }
@@ -35,18 +36,27 @@ namespace SlidePilot {
             if(pieces.Length>14 || path.Length>350) throw new ArgumentException("Chart path is too deep.");
             object obj=chart;
             for(int i=0;i<pieces.Length-1;i++) obj=Hop(obj,pieces[i]);
-            string key=pieces[pieces.Length-1];
+            var last=Segment.Match(pieces[pieces.Length-1]);
+            if(!last.Success) throw new ArgumentException("Invalid chart property: "+pieces[pieces.Length-1]);
+            string key=last.Groups[1].Value;
+            object[] indices=last.Groups[2].Success?Array.ConvertAll(last.Groups[2].Value.Split(','),x=>(object)Int32.Parse(x,CultureInfo.InvariantCulture)):new object[0];
+            // HasAxis is an indexed Office property, not a child collection.
+            // Keep other method/property arguments on the explicit args route.
+            if(indices.Length>0 && (key!="HasAxis" || indices.Length!=2 ||
+               (int)indices[0]<1 || (int)indices[0]>3 || (int)indices[1]<1 || (int)indices[1]>2))
+                throw new ArgumentException("Indexed scalar properties use HasAxis(axisType, axisGroup).");
             if(read) {
                 if(!writable.Contains(key) && key!="Count" && key!="Index") throw new ArgumentException("Unknown readable property: "+key);
-                object result=Invoke(obj,key,BindingFlags.GetProperty,new object[0]);
+                object result=Invoke(obj,key,BindingFlags.GetProperty,indices);
                 if(result!=null && System.Runtime.InteropServices.Marshal.IsComObject(result)) throw new ArgumentException("Select a scalar child of "+key);
                 return result;
             }
             if(op.ContainsKey("value")) {
                 if(!writable.Contains(key)) throw new ArgumentException("Unknown writable property: "+key);
-                if(key=="Name" && pieces.Length>1 && pieces[pieces.Length-2].StartsWith("SeriesCollection") && Convert.ToString(op["value"]).StartsWith("="))
+                if(key=="Name" && pieces.Length>1 && Regex.IsMatch(pieces[pieces.Length-2],@"^(FullSeriesCollection|SeriesCollection)(\(|$)") && Convert.ToString(op["value"]).TrimStart().StartsWith("="))
                     throw new ArgumentException("Use a literal series name.");
-                Invoke(obj,key,BindingFlags.SetProperty,new[]{Scalar(op["value"])});
+                var values=new List<object>(indices);values.Add(Scalar(op["value"]));
+                Invoke(obj,key,BindingFlags.SetProperty,values.ToArray());
             } else {
                 if(!methods.Contains(key)) throw new ArgumentException("Unknown chart action: "+key);
                 if(key=="Delete" && (pieces.Length<2 || !Regex.IsMatch(pieces[pieces.Length-2],@"^(Trendlines|DataLabels|LegendEntries)\(\d+\)$")))

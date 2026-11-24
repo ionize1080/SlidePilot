@@ -2,6 +2,7 @@
 
 | Component | Distribution and notices |
 | --- | --- |
+| PagePilot | Workspace interactions and reference handling adapted from ionize1080/PagePilot, revision `01f5e69c799c4fdeb7b28c444450f1e9e1318fee`, GPL-3.0. The license is included in `licenses/pagepilot.txt`. |
 | Chatbox CE 1.20.3 | GPL-3.0. Upstream revision `d3cd0ad1e6a1127bbbf3991bb5296c181f4cbdeb`. The source package includes the upstream archive, SlidePilot patch and build scripts. The binary contains the license in `Chatbox/LICENSE` and module notices under `Chatbox/licenses` and `Chatbox/node_modules`. |
 | Electron 44.7.0 and Chromium | Upstream Windows x64 archive. License and Chromium notices accompany the executable under `Electron`. |
 | CPython 3.12.10 | Python Software Foundation license in `Runtime/LICENSE.txt`. |

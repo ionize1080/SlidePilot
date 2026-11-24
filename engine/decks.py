@@ -29,6 +29,11 @@ def width_units(s):
     return sum(1 if unicodedata.east_asian_width(c) in ("W","F") else .53 for c in s)
 
 
+def wrapped_lines(text,size,width):
+    # An explicit newline consumes a full line even when its text is short.
+    return sum(max(1,int((width_units(line)*size-1)//width)+1) for line in text.splitlines() or [""])
+
+
 def para(body,text,size,tone,bold=False):
     p=tag("a:p",body)
     run=tag("a:r",p)
@@ -53,7 +58,8 @@ def tx(tree,idx,name,x,y,w,h,lines,size,tone,bold=False):
     body=tag("p:txBody",sp)
     tag("a:bodyPr",body,wrap="square",lIns=0,rIns=0,tIns=0,bIns=0,anchor="t")
     tag("a:lstStyle",body)
-    for line in lines: para(body,line,size,tone,bold)
+    for line in lines:
+        for paragraph in line.splitlines() or [""]: para(body,paragraph,size,tone,bold)
     return sp
 
 
@@ -169,7 +175,7 @@ def compose(root,reader,plan):
         charts.solid(tag("p:bgPr",bg),"F2F7F6" if is_cover else "FFFFFF")
         cs.insert(0,bg)
         hd_size=44 if is_cover else 32
-        title_lines=max(1,int((width_units(heading)*hd_size-1)//866)+1)
+        title_lines=wrapped_lines(heading,hd_size,864)
         if title_lines>3: raise ValueError("Shorten slide title "+str(i))
         top=112 if is_cover else 32
         hh=title_lines*hd_size*1.25
@@ -179,7 +185,7 @@ def compose(root,reader,plan):
         bw=280 if split else 864
         bsize=19 if split else 23
         if body:
-            lines=sum(max(1,int((width_units(t)*bsize-1)//bw)+1) for t in body)
+            lines=sum(wrapped_lines(t,bsize,bw) for t in body)
             if lines*bsize*1.32>496-start_y:
                 raise ValueError("Body text would overflow on slide "+str(i)+"; split or shorten the slide")
             tx(tree,3,"Commentary",48,start_y,bw,490-start_y,body,bsize,"263E43")
@@ -199,7 +205,9 @@ def compose(root,reader,plan):
             tag("c:chart",frame(tree,4,"Chart",spec.get("alt",spec.get("title",heading)),rect,NS["c"]),**{"r:id":"rIdChart"})
             links.append(("rIdChart","chart","../charts/chart%d.xml"%chart_no))
             if "dataRef" in s["chart"]:
-                sources.append(s["chart"]["dataRef"]["file"]+" · "+str(len(spec["categories"]))+" data rows")
+                source_file=s["chart"]["dataRef"]["file"]
+                source_label=reader.source_label(source_file) if hasattr(reader,"source_label") else source_file
+                sources.append(source_label+" · "+str(len(spec["categories"]))+" data rows")
         if "table" in s:
             table(frame(tree,4,"Table",heading,rect,"http://schemas.openxmlformats.org/drawingml/2006/table"),s["table"],rect[2],rect[3])
         if "image" in s:
