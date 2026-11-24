@@ -40,7 +40,7 @@ To repeat the packaged MCP checks, run `node tests/portable_smoke.cjs "C:\SlideP
 
 PowerPoint 16 on the Windows desktop opened Harbour.pptx and returned the add-in Ribbon callback. Its SlidePilot tab showed AI 助手 and 设置. Selecting 设置 opened the dedicated Electron product preferences with the workspace, appearance and maintenance pages. The host recorded the PowerPoint process start time and add-in directory so Setup can distinguish registration from an actual Ribbon load.
 
-The reference-workspace test used the two sample files to create a three-slide presentation through the same compose and validation path, with a test approval callback. Both embedded series matched all four quarters, the notes retained source citations, and the Office 2010 schema validator reported zero errors. These are local composition results. The live Qwen attempt on 24 November 2026 used the supplied OpenAI-compatible endpoint and qwen3.8-flash. Its first request timed out at 10 seconds on the execution environment's configured proxy, before any tool call or generated slide. Native model response time and provider-generated slide quality remain unverified.
+The reference-workspace test used the two sample files to create a three-slide presentation through the same compose and validation path, with a test approval callback. Both embedded series matched all four quarters, the notes retained source citations, and the Office 2010 schema validator reported zero errors. These are local composition results. The live Qwen attempt on 24 November 2026 used the supplied OpenAI-compatible endpoint and qwen3.8-flash. The Python client timed out after 10 seconds without receiving an HTTP status, before any tool call or generated slide. A proxy was configured in that execution environment. The timeout did not identify the failing hop or exercise the desktop client. Native model response time and provider-generated slide quality remain unverified.
 
 From the extracted package, run:
 ```bat
@@ -59,3 +59,9 @@ After closing the presentation and restarting PowerPoint, opening **AI assistant
 The final build waited for two nonzero layout observations from the task pane itself. On the same desktop at 192 DPI (200% scaling), the PowerPoint client measured 2134 physical pixels across. After Office applied the requested width, the add-in read back a pane client width of 960 physical pixels (480 logical pixels). The sidebar screenshot showed the draft, workspace count, approval shield, settings and selected model together. The task pane is sized once so users can resize it afterwards.
 
 In the final desktop test the user clicked the sidebar's own pop-out arrow. We observed the detached Chatbox window with the original unsent text, one reference source, the selected model and manual approval mode. Its title bar again offered the action to dock in PowerPoint.
+
+## RC4 model discovery
+
+The installed PagePilot 0.4.9 renderer and the original SlidePilot RC3 renderer were exercised with the same synthetic API key and an in-memory response. Their built-in OpenAI model-list code both issued `GET /compatible-mode/v1/models`. PagePilot passed the configured key to its provider factory. RC3 omitted the effective API key from the factory arguments and generated `Bearer undefined`. Normal chat uses a different factory call. No credential or response content from a real account was used in this comparison.
+
+For desktop troubleshooting, the assistant startup log at `%LOCALAPPDATA%\SlidePilot\logs\assistant-startup.log` records the request method, operation (`models` or `chat`) and HTTP status or Chromium network error for the configured Qwen Token Plan service. The Python benchmark uses a different HTTP client.

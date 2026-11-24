@@ -43,11 +43,20 @@ Object.defineProperty(process, 'resourcesPath', { value: path.join(__dirname, 'r
 
 function config(saved) {
   saved = saved || {}
-  const qwen = { apiHost: 'https://token-plan.maas.qianwenaiapi.com/compatible-mode/v1',
-    models: ['qwen3.8-flash', 'qwen3.8-max'].map(modelId => ({ modelId, capabilities: ['tool_use'] })) }
+  const tokenPlanHost = 'https://token-plan.maas.qianwenaiapi.com/compatible-mode/v1'
+  // Repair only the initial SlidePilot service or an explicitly configured TokenPlan
+  // endpoint. An existing provider's keys, proxy, host and nonempty list are retained.
+  const previousOpenAI = saved.providers?.openai
+  const openai = previousOpenAI && Object.keys(previousOpenAI).length
+    ? { ...previousOpenAI } : { apiHost: tokenPlanHost }
+  const isTokenPlan = typeof openai.apiHost === 'string' &&
+    openai.apiHost.trim().replace(/\/+$/, '') === tokenPlanHost && openai.activeAuthMode !== 'oauth'
+  if (isTokenPlan && (!Array.isArray(openai.models) || openai.models.length === 0)) {
+    openai.models = ['qwen3.8-flash', 'qwen3.8-max'].map(modelId => ({ modelId, capabilities: ['tool_use'] }))
+  }
   return { language: 'zh-Hans', ...saved, autoUpdate: false,
-    providers: { ...saved.providers, openai: { ...qwen, ...saved.providers?.openai } },
-    defaultChatModel: saved.defaultChatModel || { provider: 'openai', model: 'qwen3.8-flash' },
+    providers: { ...saved.providers, openai },
+    defaultChatModel: saved.defaultChatModel || (isTokenPlan ? { provider: 'openai', model: openai.models[0].modelId } : undefined),
     mcp: { ...saved.mcp, enabledBuiltinServers: [], servers: [
       { id: 'slidepilot', name: 'SlidePilot', enabled: true,
         transport: { type: 'stdio', command: python, args: ['-B', server] } },
@@ -169,6 +178,8 @@ ipcMain.handle = (channel, handler) => {
 app.on('browser-window-created', (_event, window) => {
   if (primary) return
   primary = window
+  try { require('./provider-diagnostics.cjs').observe(window.webContents.session.webRequest, startupLog) }
+  catch { startupLog('Qwen desktop diagnostics unavailable') }
   window.setMinimumSize(320, 240)
   window.hookWindowMessage(0x8047, () => {
     if (window.isMinimized()) window.restore()

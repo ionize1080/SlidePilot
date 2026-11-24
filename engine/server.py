@@ -184,7 +184,7 @@ def response(service,msg):
     if method=="initialize":
         version=params.get("protocolVersion")
         result={"protocolVersion":version if version in VERSIONS else VERSIONS[0],"capabilities":{"tools":{"listChanged":False}},
-                "serverInfo":{"name":"SlidePilot","version":"0.1.0-rc.3"},"instructions":GUIDES["workflow"]}
+                "serverInfo":{"name":"SlidePilot","version":"0.1.0-rc.4"},"instructions":GUIDES["workflow"]}
     elif method=="ping":result={}
     elif method=="tools/list":result={"tools":list(TOOLS.values())}
     elif method=="tools/call":

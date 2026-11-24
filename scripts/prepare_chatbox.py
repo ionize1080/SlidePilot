@@ -14,6 +14,8 @@ COMMIT = "d3cd0ad1e6a1127bbbf3991bb5296c181f4cbdeb"
 sys.path.insert(0, str(ROOT / "chatbox"))
 import workspace_source
 import prepare_compat
+import provider_source
+import prepare_provider_registry
 
 
 def run(*args, cwd=ROOT, env=None):
@@ -50,11 +52,14 @@ def main():
             run("git", "clone", "--no-checkout", args.mirror, str(SRC))
         run("git", "checkout", "--detach", COMMIT, cwd=SRC)
     patch = ROOT / "chatbox/slidepilot.patch"
+    provider_source.restore(SRC)
     workspace_source.restore(SRC)
     if not args.reuse_source and subprocess.run(["git", "apply", "--reverse", "--check", str(patch)], cwd=SRC, capture_output=True).returncode:
         run("git", "apply", "--whitespace=nowarn", str(patch), cwd=SRC)
     workspace_source.apply(SRC)
     prepare_compat.apply(SRC)
+    provider_source.apply(SRC)
+    prepare_provider_registry.apply(SRC)
     env = dict(os.environ, ELECTRON_SKIP_BINARY_DOWNLOAD="1", HUSKY="0", NODE_OPTIONS="--max-old-space-size=8192", NODE_ENV="development")
     if args.reuse_source:
         if not (SRC / "node_modules/electron-vite/bin/electron-vite.js").exists():

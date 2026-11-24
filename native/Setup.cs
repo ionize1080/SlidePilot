@@ -69,7 +69,7 @@ namespace SlidePilot {
             sideFlow.Controls.Add(Label("SlidePilot",19,Color.White,true));
             sideFlow.Controls.Add(Label("FOR POWERPOINT",8,Color.FromArgb(157,184,195)));
             sideText=Label("",10,Color.FromArgb(202,219,226));sideText.MaximumSize=new Size(155,0);sideText.Margin=new Padding(0,32,0,0);sideFlow.Controls.Add(sideText);
-            var version=Label("0.1.0 RC3\nWindows · Portable",8,Color.FromArgb(157,184,195));version.Dock=DockStyle.Bottom;side.Controls.Add(version);
+            var version=Label("0.1.0 RC4\nWindows · Portable",8,Color.FromArgb(157,184,195));version.Dock=DockStyle.Bottom;side.Controls.Add(version);
 
             var content=new TableLayoutPanel{Dock=DockStyle.Fill,ColumnCount=1,RowCount=8,Padding=new Padding(28,25,28,18),Margin=Padding.Empty};
             for(int i=0;i<8;i++) content.RowStyles.Add(new RowStyle(i==5?SizeType.Percent:SizeType.AutoSize,i==5?100:0));
@@ -162,7 +162,7 @@ namespace SlidePilot {
                 if(failedLoad){badge.Text=T("需要修复","REPAIR NEEDED");summary.Text=T("PowerPoint 上次未能加载插件","PowerPoint could not load the add-in");hint.Text=T("请先关闭 PowerPoint，再修复并重新打开。若仍失败，可查看日志中的启动原因。","Close PowerPoint, repair, then reopen it. If loading still fails, check the startup log.");}
                 if(HostHealth.IsLoaded(root)){badge.Text=T("功能区已加载","RIBBON LOADED");summary.Text=T("PowerPoint 已加载此版本的功能区","PowerPoint has loaded this version’s ribbon");}
                 if(writeLog) {
-                    details.Clear();Append("SlidePilot 0.1.0 RC3 · "+DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));Append("Scope: "+(Machine?"All users (HKLM)":"Current user (HKCU)")+"; Administrator: "+Manager.IsAdministrator());Append("Folder: "+root);Append("PowerPoint: "+(powerpoint??"not found"));Append("Excel: "+(excel??"not found"));Append(registration.ToString().TrimEnd());
+                    details.Clear();Append("SlidePilot 0.1.0 RC4 · "+DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));Append("Scope: "+(Machine?"All users (HKLM)":"Current user (HKCU)")+"; Administrator: "+Manager.IsAdministrator());Append("Folder: "+root);Append("PowerPoint: "+(powerpoint??"not found"));Append("Excel: "+(excel??"not found"));Append(registration.ToString().TrimEnd());
                     if(missing.Length>0)Append("Missing: "+String.Join(", ",missing));
                     if(Machine && Manager.HasUserOverride())Append(T("检测到当前账户的旧注册。若要迁移到整台电脑，请勾选“备份并替换”，再启用此版本。","A per-user registration exists. To migrate it, select Back up and replace, then enable this version."));
                     if(Manager.IsAdministrator())Append(T("当前安装器以管理员运行。请从开始菜单正常打开 PowerPoint；提升运行的 Office 可能不加载仅当前用户插件。","Setup is elevated. Open PowerPoint normally from Start; elevated Office may ignore per-user COM registration."));

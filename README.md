@@ -6,7 +6,7 @@ SlidePilot turns workspace files into editable PowerPoint slides. The assistant 
 
 1. 将完整便携包解压到固定目录，保存并关闭 PowerPoint。双击 `Enable.cmd` 或 `SlidePilot.Setup.exe` 打开安装器，选择“仅当前用户”或“整台电脑（管理员）”，点击启用。整机安装的目录须让所有使用者都能读取。已有用户注册时，可以选择备份并替换旧注册。
 2. 在安装器中点击“启动并验证 PowerPoint”，然后打开一份演示文稿。安装器会等待该版本的功能区加载回执。SlidePilot 选项卡提供 **AI 助手** 和 **设置**。
-3. 在 **AI 助手 → Chatbox 设置 → 模型提供商 → OpenAI** 中填写密钥。在原生连接设置中使用 `https://token-plan.maas.qianwenaiapi.com/compatible-mode/v1` 和 `qwen3.8-flash`。模型列表旁的连接测试可以检查供应商响应。
+3. 在 **AI 助手 → Chatbox 设置 → 模型提供方 → OpenAI** 填写密钥，API 地址使用 `https://token-plan.maas.qianwenaiapi.com/compatible-mode/v1`。点 **获取** 查看千问服务为当前密钥返回的模型，点模型旁的加号添加到列表。要验证对话，再点 **检查** 并选择 `qwen3.8-flash` 等已添加的模型。
 4. 在对话输入栏打开 **工作区**，加入包内示例目录 `examples/workspace`，或将自己的文件拖入浮层。独立文件、真实文件夹及虚拟文件夹可以混用。新聊天首次发送后保留本次添加的资料。移除资料引用会保留原文件。
 5. 可以输入“读取工作区里的简报和存款表，做三页季度回顾。按季度画出两类存款的可编辑图表，把来源写入每页备注，并说明试点的下一步。”批准写入后，在工作区中找到生成的演示文稿。右键图表选择 **编辑数据 → 在 Excel 中编辑数据** 可修改内嵌工作簿。
 6. 助手默认逐项请求写入批准。点击输入栏盾牌并完成两次确认，即可为当前演示文稿开启自动批准。红色盾牌表示已开启，再点一次恢复手动。切换演示文稿或重启 PowerPoint 后恢复手动。

@@ -18,7 +18,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 from prepare_chatbox import COMMIT
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = "0.1.0-rc.3"
+VERSION = "0.1.0-rc.4"
 DIST = ROOT / "dist"
 ARCHIVES = {
     "Runtime": ("https://www.python.org/ftp/python/3.12.10/python-3.12.10-embed-amd64.zip",
@@ -212,7 +212,7 @@ def chatbox_files(out, modules, reused=False):
     dest = out / "Chatbox"
     if not (src / "release/app/dist/renderer/index.html").is_file():
         raise ValueError("Compile the pinned Chatbox checkout using prepare_chatbox.py first.")
-    for filename in ("package.json", "package-lock.json", "bootstrap.cjs", "workspace-main.cjs", "window-mode-main.cjs",
+    for filename in ("package.json", "package-lock.json", "bootstrap.cjs", "provider-diagnostics.cjs", "workspace-main.cjs", "window-mode-main.cjs",
                      "settings-entry.cjs", "settings-preload.cjs", "settings.html", "settings.css", "settings.js"):
         file_copy(ROOT / "chatbox" / filename, dest / filename)
     if reused:

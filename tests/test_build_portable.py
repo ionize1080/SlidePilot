@@ -129,7 +129,7 @@ class OfflinePackageTests(unittest.TestCase):
         (chat / "package-lock.json").write_bytes(self.lock.read_bytes())
         (chat / "package.json").write_text("{}")
         (chat / "bootstrap.cjs").write_bytes(b"current bootstrap")
-        for filename in ("workspace-main.cjs", "window-mode-main.cjs", "settings-entry.cjs", "settings-preload.cjs", "settings.html", "settings.css", "settings.js"):
+        for filename in ("provider-diagnostics.cjs", "workspace-main.cjs", "window-mode-main.cjs", "settings-entry.cjs", "settings-preload.cjs", "settings.html", "settings.css", "settings.js"):
             (chat / filename).write_text(filename)
         upstream = source / ".build/chatbox"
         (upstream / "release/app/dist/renderer").mkdir(parents=True)
@@ -149,6 +149,7 @@ class OfflinePackageTests(unittest.TestCase):
 
         def finalize(out):
             self.assertEqual((out / "Chatbox/bootstrap.cjs").read_bytes(), b"current bootstrap")
+            self.assertTrue((out / "Chatbox/provider-diagnostics.cjs").is_file())
             self.assertTrue((out / "Chatbox/workspace-main.cjs").is_file())
             self.assertTrue((out / "Chatbox/window-mode-main.cjs").is_file())
             self.assertTrue((out / "Chatbox/settings.html").is_file())
