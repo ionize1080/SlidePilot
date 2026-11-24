@@ -47,3 +47,13 @@ From the extracted package, run:
 Test-Qwen.cmd "C:\private\provider-key.txt"
 ```
 This uses the bundled Python, sends the included example only, and writes latest-result.json and a per-run directory under %LOCALAPPDATA%\SlidePilot\benchmarks. The report checks the legacy host-tool workflow with a fixture approval host. It does not exercise the interactive chat window or grant automatic approval.
+
+## RC3 window modes
+
+On Windows 11 with PowerPoint 16, the portable installer upgraded the current user's registration from the previous directory. Both registry views pointed to the RC3 add-in. The reopened presentation showed the two SlidePilot commands. The all-users option was visible in Setup; this run used the current-user option.
+
+With Harbour.pptx open, the assistant's title-bar button docked its existing window in a real PowerPoint task pane. The reverse trip through **Settings → AI assistant → Detached window** restored the original desktop window handle. The unsent draft, one reference to `brief.md`, and the selected `qwen3.8-flash` model remained present on both sides of the transition. The title-bar control displayed the matching pop-out action while docked. Automated tests exercise both directions of the title-bar control, concurrent requests, rejected switches, and late replies.
+
+After closing the presentation and restarting PowerPoint, opening **AI assistant** restored sidebar mode. The test draft and workspace reference were still present. On the first desktop pass, a 1069-pixel-wide PowerPoint window opened a roughly 240-pixel pane. A second pass reproduced an empty geometry report during the synchronous first show. In the compact renderer the workspace button and model selector remained visible below the draft even when the pane was only about 180 pixels wide.
+
+The final build waited for two nonzero layout observations from the task pane itself. On the same desktop at 192 DPI (200% scaling), the PowerPoint client measured 2134 physical pixels across. After Office applied the requested width, the add-in read back a pane client width of 960 physical pixels (480 logical pixels). The sidebar screenshot showed the draft, workspace count, approval shield, settings and selected model together. The task pane is sized once so users can resize it afterwards.
