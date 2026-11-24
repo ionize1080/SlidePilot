@@ -34,16 +34,25 @@ namespace SlidePilot {
         [DispId(7)] void OpenSettings(Office.IRibbonControl control);
     }
     [ComVisible(true),Guid("FB9007D1-2CB9-4C9D-8FC4-4A96CA980A3E"),ProgId("SlidePilot.PowerPoint"),ClassInterface(ClassInterfaceType.None),ComDefaultInterface(typeof(IRibbon))]
-    public sealed class Connect:IDTExtensibility2,Office.IRibbonExtensibility,IRibbon {
+    public sealed class Connect:IDTExtensibility2,Office.IRibbonExtensibility,Office.ICustomTaskPaneConsumer,IRibbon {
         dynamic app;
         Control ui;
         Office.IRibbonUI ribbon;
+        Office.ICTPFactory paneFactory;
+        Office.CustomTaskPane aiPane;
+        AiPane aiControl;
+        IntPtr aiHandle;
+        long aiOwner,aiPresentation;
+        string aiMode="window";
+        TaskPaneSizing aiPaneSizing=new TaskPaneSizing();
+        bool aiPaneWidthReported;
         Process assistant,settingsProcess;
         IntPtr settingsHandle;
         System.Windows.Forms.Timer timer;
         System.Windows.Forms.Timer launchTimer;
         System.Windows.Forms.Timer settingsLaunchTimer;
         WindowChanged windowChanged;
+        PresentationClosing presentationClosing;
         volatile bool stopped;
         NamedPipeServerStream listener;
         readonly object pipeLock=new object();
@@ -68,7 +77,8 @@ namespace SlidePilot {
             StartupLog("GetCustomUI: "+id);
             return "<customUI xmlns='http://schemas.microsoft.com/office/2009/07/customui' onLoad='Loaded'><ribbon><tabs><tab id='SlidePilotTab' label='SlidePilot'><group id='SlidePilotTools' label='SlidePilot'><button id='SlidePilotChat' label='AI 助手' size='large' getImage='GetImage' onAction='OpenChat' screentip='打开 SlidePilot' supertip='在 AI 窗口中管理工作空间、阅读资料并生成可编辑幻灯片。'/><button id='SlidePilotSettings' label='设置' size='large' getImage='GetImage' onAction='OpenSettings' screentip='SlidePilot 设置' supertip='管理 AI 连接、安装状态及诊断。'/></group></tab></tabs></ribbon></customUI>";
         }
-        IntPtr HostWindow(){try{return new IntPtr(Convert.ToInt64(app.HWND));}catch{return IntPtr.Zero;}}
+        IntPtr HostWindow(){try{return new IntPtr(Convert.ToInt64(app.ActiveWindow.HWND));}catch{try{return new IntPtr(Convert.ToInt64(app.HWND));}catch{return IntPtr.Zero;}}}
+        public void CTPFactoryAvailable(Office.ICTPFactory value){paneFactory=value;StartupLog("CTPFactoryAvailable");}
         public object GetImage(Office.IRibbonControl control) {return RibbonIcons.Get(control.Id,HostWindow(),theme);}
         public void OpenSettings(Office.IRibbonControl control) {
             try {
@@ -100,8 +110,9 @@ namespace SlidePilot {
             try {
                 string preferences=Path.Combine(profile,"preferences.json");
                 if(File.Exists(preferences)) {
-                    var saved=Json().Deserialize<Dictionary<string,object>>(File.ReadAllText(preferences));object color;
+                    var saved=Json().Deserialize<Dictionary<string,object>>(File.ReadAllText(preferences));object color,mode;
                     if(saved.TryGetValue("theme",out color)){int value=Convert.ToInt32(color);if(value>=0 && value<=2)theme=value;}
+                    if(saved.TryGetValue("aiMode",out mode) && (Convert.ToString(mode)=="sidebar" || Convert.ToString(mode)=="window"))aiMode=Convert.ToString(mode);
                 }
             } catch(Exception e){StartupLog("Preferences fallback: "+e.GetType().Name);}
             string stateFile=Path.Combine(profile,"workspace.txt");
@@ -119,13 +130,22 @@ namespace SlidePilot {
             stopped=false;
             new Thread(Serve){IsBackground=true,Name="SlidePilot named pipe"}.Start();
             timer=new System.Windows.Forms.Timer{Interval=200};
-            timer.Tick+=delegate {RefreshScope();};
+            timer.Tick+=delegate {RefreshScope();SyncAssistantPane();};
             timer.Start();
             windowChanged=new WindowChanged(WindowActivated);
-            try {ComEventsHelper.Combine(application,new Guid("914934C2-5A91-11CF-8700-00AA0060263B"),2010,windowChanged);} catch(COMException) {}
+            try {ComEventsHelper.Combine(application,new Guid("914934C2-5A91-11CF-8700-00AA0060263B"),2009,windowChanged);} catch(COMException) {}
+            presentationClosing=new PresentationClosing(PresentationClosed);
+            try {ComEventsHelper.Combine(application,new Guid("914934C2-5A91-11CF-8700-00AA0060263B"),2004,presentationClosing);}catch(COMException){}
         }
         delegate void WindowChanged([MarshalAs(UnmanagedType.IDispatch)] object presentation,[MarshalAs(UnmanagedType.IDispatch)] object window);
-        void WindowActivated(object presentation,object window) {RefreshScope();}
+        delegate void PresentationClosing([MarshalAs(UnmanagedType.IDispatch)] object presentation);
+        void WindowActivated(object presentation,object window) {RefreshScope();SyncAssistantPane();}
+        void PresentationClosed(object presentation) {
+            // Detach before the document frame is destroyed: an owned Chromium
+            // window would otherwise be destroyed with that Office window.
+            try {if(aiPane!=null && aiPresentation==Identity(presentation)){RemoveAssistantPane();aiMode="window";ResetScope();}}
+            catch(Exception e){StartupLog("Presentation close: "+e.GetBaseException().Message);}
+        }
         public void OnStartupComplete(ref Array c) {}
         public void OnAddInsUpdate(ref Array c) {}
         public void OnBeginShutdown(ref Array c) {Stop();}
@@ -136,7 +156,9 @@ namespace SlidePilot {
             if(timer!=null) timer.Dispose();
             if(launchTimer!=null) launchTimer.Dispose();
             if(settingsLaunchTimer!=null)settingsLaunchTimer.Dispose();
-            try {if(windowChanged!=null) ComEventsHelper.Remove((object)app,new Guid("914934C2-5A91-11CF-8700-00AA0060263B"),2010,windowChanged);} catch(Exception) {}
+            RemoveAssistantPane();aiHandle=IntPtr.Zero;
+            try {if(windowChanged!=null) ComEventsHelper.Remove((object)app,new Guid("914934C2-5A91-11CF-8700-00AA0060263B"),2009,windowChanged);} catch(Exception) {}
+            try {if(presentationClosing!=null)ComEventsHelper.Remove((object)app,new Guid("914934C2-5A91-11CF-8700-00AA0060263B"),2004,presentationClosing);}catch(Exception){}
             lock(pipeLock){if(listener!=null) listener.Dispose();}
             try {if(assistant!=null && !assistant.HasExited) assistant.CloseMainWindow();}catch(InvalidOperationException){}
             try {if(settingsProcess!=null && !settingsProcess.HasExited) settingsProcess.CloseMainWindow();}catch(InvalidOperationException){}
@@ -174,7 +196,7 @@ namespace SlidePilot {
             if(!pressed){automatic=false;approvalGeneration++;return;}
             EnableAutomatic(delegate {
                 using(var confirmation=new AutomaticApprovalDialog(Convert.ToString(Deck().Name),workspace)) {
-                    IntPtr owner=HostWindow();
+                    IntPtr owner=ApprovalOwner();
                     confirmation.Shown+=delegate{SetForegroundWindow(confirmation.Handle);};
                     return (owner==IntPtr.Zero?confirmation.ShowDialog():confirmation.ShowDialog(new OfficeWindow(owner)))==DialogResult.OK;
                 }
@@ -213,6 +235,77 @@ namespace SlidePilot {
         [DllImport("user32.dll")] static extern bool ShowWindowAsync(IntPtr handle,int cmd);
         [DllImport("user32.dll")] static extern bool PostMessage(IntPtr handle,uint message,IntPtr w,IntPtr l);
         [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr handle,out uint processId);
+        [DllImport("user32.dll")] static extern bool IsWindow(IntPtr handle);
+        [DllImport("user32.dll")] static extern IntPtr GetAncestor(IntPtr handle,uint flags);
+        [DllImport("user32.dll")] static extern uint GetDpiForWindow(IntPtr handle);
+        [StructLayout(LayoutKind.Sequential)] struct ClientRect {public int left,top,right,bottom;}
+        [DllImport("user32.dll")] static extern bool GetClientRect(IntPtr handle,out ClientRect rectangle);
+        [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr handle,out ClientRect rectangle);
+        bool KnownAssistantWindow(IntPtr handle) {
+            uint pid;GetWindowThreadProcessId(handle,out pid);
+            return IsWindow(handle) && GetAncestor(handle,2)==handle && assistant!=null && !assistant.HasExited && pid==(uint)assistant.Id;
+        }
+        IntPtr ApprovalOwner(){try{if(KnownAssistantWindow(aiHandle))return aiHandle;}catch(InvalidOperationException){}return HostWindow();}
+        void RemoveAssistantPane() {
+            try {if(aiControl!=null)aiControl.Detach();}catch(Exception e){StartupLog("Assistant detach: "+e.GetType().Name);}
+            try {if(aiPane!=null)aiPane.Delete();}catch(Exception e){StartupLog("Assistant pane cleanup: "+e.GetType().Name);}
+            aiControl=null;aiPane=null;aiOwner=0;aiPresentation=0;aiPaneSizing=new TaskPaneSizing();aiPaneWidthReported=false;
+        }
+        void InitializePaneWidthWhenReady() {
+            if(aiPaneWidthReported || aiPane==null || aiControl==null || !aiControl.IsHandleCreated || !aiControl.Visible || !aiPane.Visible)return;
+            // The Office ActiveWindow HWND can be unavailable during creation.
+            // The actual ActiveX control, once parented, identifies its real frame.
+            IntPtr control=aiControl.Handle,host=GetAncestor(control,2);
+            if(host==IntPtr.Zero || host==control || !IsWindow(host))return;
+            ClientRect hostClient,hostOuter,paneOuter,paneClient;
+            if(!GetClientRect(host,out hostClient) || !GetWindowRect(host,out hostOuter) ||
+                !GetWindowRect(control,out paneOuter) || !GetClientRect(control,out paneClient))return;
+            int hostPixels=hostClient.right-hostClient.left,panePixels=paneOuter.right-paneOuter.left;
+            if(hostPixels<=0 || panePixels<=0 || paneClient.right-paneClient.left<=0 || paneClient.bottom-paneClient.top<=0)return;
+            uint dpi=96;try{uint measured=GetDpiForWindow(host);if(measured>0)dpi=measured;}catch(EntryPointNotFoundException){}
+            int units=aiPane.Width;if(units<=0)return;
+            if(aiPaneSizing.Applied) {
+                StartupLog("Assistant pane width verified: hostPixels="+hostPixels+" hostOuterPixels="+(hostOuter.right-hostOuter.left)+" dpi="+dpi+" panePixels="+panePixels+" paneClientPixels="+(paneClient.right-paneClient.left)+" readbackUnits="+units+" requestedUnits="+aiPaneSizing.RequestedWidth);
+                aiPaneWidthReported=true;return;
+            }
+            if(aiPaneSizing.Observe(hostPixels,(int)dpi,units,panePixels,delegate(int width){aiPane.Width=width;}))
+                StartupLog("Assistant initial pane width applied: hostPixels="+hostPixels+" dpi="+dpi+" currentUnits="+units+" currentPixels="+panePixels+" requestedUnits="+aiPaneSizing.RequestedWidth);
+        }
+        void ApplyAiMode(string mode) {
+            AiModeTransition.Validate(mode);
+            if(mode=="sidebar") {
+                Deck();
+                if(paneFactory==null)throw new InvalidOperationException("PowerPoint has not initialized task panes. Restart PowerPoint and try again.");
+            }
+            if(aiHandle==IntPtr.Zero || !IsWindow(aiHandle)){RemoveAssistantPane();aiHandle=IntPtr.Zero;return;}
+            if(mode=="window") {if(aiControl!=null)aiControl.Detach();if(aiPane!=null)aiPane.Visible=false;return;}
+            object window=(object)app.ActiveWindow;long identity=Identity(window);
+            if(aiPane!=null && aiOwner!=identity)RemoveAssistantPane();
+            if(aiPane==null) {
+                try {
+                    aiPane=paneFactory.CreateCTP("SlidePilot.AiPane","SlidePilot · AI 助手",window);
+                    aiPane.DockPosition=Office.MsoCTPDockPosition.msoCTPDockPositionRight;
+                    aiControl=(AiPane)aiPane.ContentControl;aiOwner=identity;aiPresentation=Identity((object)Deck());
+                } catch {RemoveAssistantPane();throw;}
+            }
+            // Geometry is initialized by the UI timer only after the real
+            // ActiveX HWND has nonzero, stable layout; never size from defaults.
+            aiPane.Visible=true;aiControl.Attach(aiHandle);
+        }
+        void SetAiMode(string mode) {
+            aiMode=AiModeTransition.Change(aiMode,mode,ApplyAiMode,delegate(string value){SavePreference("aiMode",value);});
+            StartupLog("Assistant mode: "+aiMode);
+        }
+        void SyncAssistantPane() {
+            if(aiHandle==IntPtr.Zero)return;
+            if(!IsWindow(aiHandle)){RemoveAssistantPane();aiHandle=IntPtr.Zero;return;}
+            if(aiMode!="sidebar")return;
+            try {
+                if(scope==""){ApplyAiMode("window");aiMode="window";return;}
+                if(aiPane==null || aiOwner!=Identity((object)app.ActiveWindow))ApplyAiMode("sidebar");
+                InitializePaneWidthWhenReady();
+            } catch(Exception e) {StartupLog("Assistant sidebar fallback: "+e.GetBaseException().Message);RemoveAssistantPane();aiMode="window";}
+        }
         ProcessStartInfo ElectronStart(string entry) {
             var start=new ProcessStartInfo(Path.Combine(root,@"Electron\electron.exe"),"\""+entry+"\""){UseShellExecute=false,WorkingDirectory=root,CreateNoWindow=true};
             foreach(string flag in new[]{"ELECTRON_RUN_AS_NODE","NODE_OPTIONS","NODE_PATH","ELECTRON_RENDERER_URL","START_MINIMIZED","DEBUG_PROD"})start.EnvironmentVariables.Remove(flag);
@@ -224,8 +317,9 @@ namespace SlidePilot {
         }
         public void OpenChat(Office.IRibbonControl c) {
             try {
-                if(assistant!=null && !assistant.HasExited) {assistant.Refresh();var h=assistant.MainWindowHandle;if(h!=IntPtr.Zero){ShowWindowAsync(h,9);SetForegroundWindow(h);}return;}
+                if(assistant!=null && !assistant.HasExited) {assistant.Refresh();var h=aiHandle!=IntPtr.Zero?aiHandle:assistant.MainWindowHandle;if(h!=IntPtr.Zero){ApplyAiMode(aiMode);if(aiMode=="window")ShowWindowAsync(h,9);SetForegroundWindow(h);}return;}
                 if(assistant!=null) assistant.Dispose();
+                RemoveAssistantPane();aiHandle=IntPtr.Zero;
                 foreach(string required in new[]{@"Electron\electron.exe",@"Chatbox\bootstrap.cjs",@"Chatbox\dist\renderer\index.html",@"Runtime\python.exe"})
                     if(!File.Exists(Path.Combine(root,required))) throw new FileNotFoundException("SlidePilot files are incomplete. Extract the complete portable ZIP, then run SlidePilot.Setup.exe again.",required);
                 var start=new ProcessStartInfo(Path.Combine(root,@"Electron\electron.exe"),"\""+Path.Combine(root,"Chatbox")+"\"") {UseShellExecute=false,WorkingDirectory=root,CreateNoWindow=true};
@@ -287,19 +381,21 @@ namespace SlidePilot {
         static Dictionary<string,object> Dict(object value) {return (Dictionary<string,object>)value;}
         object State(bool forAI=true) {
             bool provider=forAI && pendingProvider;if(forAI)pendingProvider=false;
-            return new {automatic=automatic,hasDeck=scope!="",workspace=Path.GetFileName(workspace),workspaceId=workspaceBinding,document=scope==""?"":Convert.ToString(Deck().Name),revision=++stateRevision,theme=theme,provider=provider,approvalPending=approvalPending};
+            return new {automatic=automatic,hasDeck=scope!="",workspace=Path.GetFileName(workspace),workspaceId=workspaceBinding,document=scope==""?"":Convert.ToString(Deck().Name),revision=++stateRevision,theme=theme,mode=aiMode,provider=provider,approvalPending=approvalPending};
         }
-        object SettingsState(){return new {theme=theme,version=typeof(Connect).Assembly.GetName().Version.ToString(3),office=Convert.ToString(app.Version)};}
+        object SettingsState(){return new {theme=theme,mode=aiMode,version=typeof(Connect).Assembly.GetName().Version.ToString(3),office=Convert.ToString(app.Version)};}
         void SaveTheme(int value) {
             if(value<0 || value>2)throw new ArgumentException("Unknown icon palette.");
+            SavePreference("theme",value);theme=value;if(ribbon!=null)ribbon.Invalidate();
+        }
+        void SavePreference(string key,object value) {
             string file=Path.Combine(profile,"preferences.json"),temporary=file+"."+Guid.NewGuid().ToString("N")+".tmp";
             var preferences=File.Exists(file)?Json().Deserialize<Dictionary<string,object>>(File.ReadAllText(file)):new Dictionary<string,object>();
-            preferences["theme"]=value;
+            preferences[key]=value;
             try {
                 File.WriteAllText(temporary,Json().Serialize(preferences),new UTF8Encoding(false));
                 if(File.Exists(file))File.Replace(temporary,file,null);else File.Move(temporary,file);
             } finally {if(File.Exists(temporary))File.Delete(temporary);}
-            theme=value;if(ribbon!=null)ribbon.Invalidate();
         }
         void OpenProductLocation(string target) {
             string destination;
@@ -319,10 +415,24 @@ namespace SlidePilot {
                     settingsHandle=handle;return SettingsState();
                 }
                 if(action=="settings_read")return SettingsState();
-                if(action=="settings_write"){SaveTheme(Convert.ToInt32(req["theme"]));return SettingsState();}
+                if(action=="settings_write"){
+                    if(!req.ContainsKey("theme") && !req.ContainsKey("mode"))throw new ArgumentException("No settings supplied.");
+                    if(req.ContainsKey("mode"))SetAiMode(Convert.ToString(req["mode"]));
+                    if(req.ContainsKey("theme"))SaveTheme(Convert.ToInt32(req["theme"]));return SettingsState();
+                }
                 if(action=="settings_provider"){pendingProvider=true;OpenChat(null);return new {opened=true};}
                 if(action=="settings_open"){OpenProductLocation(Convert.ToString(req["target"]));return new {opened=true};}
                 throw new ArgumentException("Unknown settings command");
+            }
+            if(action=="ai_ready" || action=="ai_mode") {
+                if(!req.ContainsKey("uiToken") || !String.Equals(uiToken,req["uiToken"] as string,StringComparison.Ordinal))throw new UnauthorizedAccessException("Assistant control required");
+                if(action=="ai_ready") {
+                    var handle=new IntPtr(Convert.ToInt64(req["handle"]));
+                    if(!KnownAssistantWindow(handle))throw new UnauthorizedAccessException("Unknown assistant window");
+                    if(aiHandle!=handle){RemoveAssistantPane();aiHandle=handle;}
+                    try {ApplyAiMode(aiMode);}catch(Exception e){RemoveAssistantPane();aiMode="window";StartupLog("Assistant ready fallback: "+e.GetBaseException().Message);}
+                } else SetAiMode(Convert.ToString(req["mode"]));
+                return State();
             }
             if(action=="ui_approval" || action=="ui_workspace" || action=="ui_settings" || action=="ui_workspace_binding") {
                 if(!req.ContainsKey("uiToken") || !String.Equals(uiToken,req["uiToken"] as string,StringComparison.Ordinal)) throw new UnauthorizedAccessException("Assistant control required");
@@ -361,13 +471,14 @@ namespace SlidePilot {
             } finally {reviewing=false;}
         }
         bool Approve(string op,string args) {
-            using(var f=new Form{Text="SlidePilot · 审批",Width=680,Height=470,StartPosition=FormStartPosition.CenterScreen,MinimizeBox=false,MaximizeBox=false}) {
+            using(var f=new Form{Text="SlidePilot · 审批",Width=680,Height=470,StartPosition=FormStartPosition.CenterParent,MinimizeBox=false,MaximizeBox=false}) {
                 var label=new Label{Dock=DockStyle.Top,Height=54,Text="演示文稿  "+Convert.ToString(Deck().Name)+"\r\n操作  "+op+"    工作空间  "+workspace,Padding=new Padding(8)};
                 var box=new TextBox{Multiline=true,ReadOnly=true,ScrollBars=ScrollBars.Both,Dock=DockStyle.Fill,Text=args};
                 var buttons=new FlowLayoutPanel{Dock=DockStyle.Bottom,Height=45,FlowDirection=FlowDirection.RightToLeft};
                 var no=new Button{Text="拒绝",DialogResult=DialogResult.Cancel}; var yes=new Button{Text="批准一次",DialogResult=DialogResult.OK};
                 buttons.Controls.Add(no);buttons.Controls.Add(yes);f.Controls.Add(box);f.Controls.Add(label);f.Controls.Add(buttons);f.CancelButton=no;f.AcceptButton=no;
-                return f.ShowDialog()==DialogResult.OK;
+                IntPtr owner=ApprovalOwner();f.Shown+=delegate{SetForegroundWindow(f.Handle);};
+                return (owner==IntPtr.Zero?f.ShowDialog():f.ShowDialog(new OfficeWindow(owner)))==DialogResult.OK;
             }
         }
         string Backup(dynamic deck) {
@@ -452,7 +563,7 @@ namespace SlidePilot {
         readonly Button next,cancel;
         public AutomaticApprovalDialog(string document,string workspace) {
             SuspendLayout();Text="SlidePilot · 自动批准";Font=new Font("Microsoft YaHei UI",9F);BackColor=DialogStyle.Surface;
-            StartPosition=FormStartPosition.CenterScreen;ClientSize=new Size(620,390);MinimumSize=new Size(620,425);ShowInTaskbar=false;MaximizeBox=false;MinimizeBox=false;
+            StartPosition=FormStartPosition.CenterParent;ClientSize=new Size(620,390);MinimumSize=new Size(620,425);ShowInTaskbar=false;MaximizeBox=false;MinimizeBox=false;
             var content=new TableLayoutPanel{Dock=DockStyle.Fill,ColumnCount=1,RowCount=6,Padding=new Padding(28)};
             for(int i=0;i<6;i++)content.RowStyles.Add(new RowStyle(i==4?SizeType.Percent:SizeType.AutoSize,i==4?100:0));Controls.Add(content);
             step=DialogStyle.Label("确认 1 / 2 · 了解范围",9,true);step.ForeColor=Color.FromArgb(176,53,53);content.Controls.Add(step,0,0);

@@ -18,7 +18,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 from prepare_chatbox import COMMIT
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = "0.1.0-rc.2"
+VERSION = "0.1.0-rc.3"
 DIST = ROOT / "dist"
 ARCHIVES = {
     "Runtime": ("https://www.python.org/ftp/python/3.12.10/python-3.12.10-embed-amd64.zip",
@@ -196,7 +196,7 @@ def build_native(out, openxml):
     common = [csc, "/nologo", "/optimize+", "/codepage:65001", "/platform:anycpu"]
     run(*common, "/target:library", "/reference:Microsoft.CSharp.dll", "/reference:System.Windows.Forms.dll",
         "/reference:System.Drawing.dll", "/reference:System.Web.Extensions.dll", f"/link:{office}", f"/link:{ext}",
-        f"/out:{out / 'SlidePilot.PowerPoint.dll'}", ROOT/"native/Connect.cs", ROOT/"native/Live.cs", ROOT/"native/OfficeGraph.cs", ROOT/"native/HostHealth.cs")
+        f"/out:{out / 'SlidePilot.PowerPoint.dll'}", ROOT/"native/Connect.cs", ROOT/"native/Live.cs", ROOT/"native/OfficeGraph.cs", ROOT/"native/HostHealth.cs", ROOT/"native/AiPane.cs")
     run(*common, "/target:exe", f"/out:{out / 'SlidePilot.Manager.exe'}", ROOT/"native/Manager.cs")
     run(*common, "/target:winexe", "/main:SlidePilot.SetupProgram", "/reference:System.Windows.Forms.dll",
         "/reference:System.Drawing.dll", "/reference:System.Web.Extensions.dll", f"/win32manifest:{ROOT / 'native/Setup.manifest'}",
@@ -212,7 +212,7 @@ def chatbox_files(out, modules, reused=False):
     dest = out / "Chatbox"
     if not (src / "release/app/dist/renderer/index.html").is_file():
         raise ValueError("Compile the pinned Chatbox checkout using prepare_chatbox.py first.")
-    for filename in ("package.json", "package-lock.json", "bootstrap.cjs", "workspace-main.cjs",
+    for filename in ("package.json", "package-lock.json", "bootstrap.cjs", "workspace-main.cjs", "window-mode-main.cjs",
                      "settings-entry.cjs", "settings-preload.cjs", "settings.html", "settings.css", "settings.js"):
         file_copy(ROOT / "chatbox" / filename, dest / filename)
     if reused:
@@ -250,16 +250,50 @@ def copy_notices(package, dest):
             file_copy(file, dest / (name + "-" + str(info.get("version", ""))) / file.name)
 
 
-def archive_project(out):
-    lines = [digest(p) + "  " + p.relative_to(out).as_posix()
-             for p in sorted(out.rglob("*")) if p.is_file()]
+def package_files(out):
+    """Inventory the immutable build stage without following links or junctions."""
+    out = Path(out)
+    if out.is_symlink() or out.is_junction():
+        raise ValueError("Linked portable stage is not supported")
+    result, seen = [], set()
+    def fail(error):
+        raise error
+    for parent, directories, files in os.walk(out, followlinks=False, onerror=fail):
+        for name in directories + files:
+            path = Path(parent) / name
+            relative = safe_zip_path(path.relative_to(out).as_posix()).as_posix()
+            info = path.lstat()
+            if (path.is_symlink() or path.is_junction() or
+                    getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT):
+                raise ValueError("Linked portable entry: " + relative)
+            if relative.casefold() in seen:
+                raise ValueError("Duplicate portable path: " + relative)
+            seen.add(relative.casefold())
+            if path.is_file():
+                if relative.casefold() == "manifest.sha256":
+                    if relative != "manifest.sha256":
+                        raise ValueError("Invalid manifest filename casing")
+                    continue
+                result.append(path)
+            elif not path.is_dir():
+                raise ValueError("Unsupported portable entry: " + relative)
+    return sorted(result)
+
+
+def write_manifest(out):
+    files = package_files(out)
+    lines = [digest(p) + "  " + p.relative_to(out).as_posix() for p in files]
     (out / "manifest.sha256").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return files
+
+
+def archive_project(out):
+    files = write_manifest(out)
     archive = DIST / f"SlidePilot-{VERSION}-portable-win-x64.zip"
     temporary = out.parent / "portable.zip"
     with ZipFile(temporary, "w", ZIP_DEFLATED, compresslevel=6) as z:
-        for p in sorted(out.rglob("*")):
-            if p.is_file():
-                z.write(p, "SlidePilot/" + p.relative_to(out).as_posix())
+        for p in files + [out / "manifest.sha256"]:
+            z.write(p, "SlidePilot/" + p.relative_to(out).as_posix())
     os.replace(temporary, archive)
     return archive
 
@@ -293,6 +327,7 @@ def main():
         python_version = tuple(int(n) for n in re.search(r"/ftp/python/([^/]+)/", ARCHIVES["Runtime"][0]).group(1).split("."))
         run(out / "Runtime/python.exe", "-B", "-c",
             "import sys; assert sys.version_info[:3] == " + repr(python_version) + "; import PIL.Image, pypdfium2, server")
+        write_manifest(out)
         run(out / "SlidePilot.Manager.exe", "check-package")
         archive = archive_project(out)
     print(f"{archive.name}  {archive.stat().st_size} bytes  {digest(archive)}")

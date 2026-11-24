@@ -114,7 +114,7 @@ def response(message):
     if method == 'initialize':
         version = params.get('protocolVersion')
         result = dict(protocolVersion=version if version in VERSIONS else VERSIONS[0], capabilities={'tools': {'listChanged': False}},
-                      serverInfo=dict(name='SlidePilot Workspace', version='0.1.0-rc.2'), instructions=INSTRUCTIONS)
+                      serverInfo=dict(name='SlidePilot Workspace', version='0.1.0-rc.3'), instructions=INSTRUCTIONS)
     elif method == 'ping':
         result = {}
     elif method == 'tools/list':

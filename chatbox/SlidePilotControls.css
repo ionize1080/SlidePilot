@@ -13,3 +13,5 @@
 [data-mantine-color-scheme=dark] .sp-chat-controls button.is-automatic{color:#ff9aa7;border-color:#ff9aa740;background:#ff9aa710}
 @media(prefers-reduced-motion:reduce){.sp-chat-controls button{transition:none!important}}
 @media(prefers-contrast:more){.sp-chat-controls button{border-color:currentColor!important}.sp-chat-controls button:focus-visible{outline-color:currentColor}}
+@media(max-width:560px){.sp-input-toolbar{flex-wrap:wrap;row-gap:6px}.sp-input-tools{width:100%;min-width:0;flex-wrap:wrap}.sp-input-model{width:100%;max-width:100%;justify-content:flex-end}.sp-chat-controls{flex-wrap:wrap;max-width:100%}.sp-control-error{flex-basis:100%;max-width:100%;white-space:normal;overflow-wrap:anywhere}}
+@media(max-width:560px){.sp-chat-title{min-width:0;flex-shrink:1}.sp-thread-label{display:none}.sp-chat-title-edit{flex-shrink:0}}

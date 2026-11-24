@@ -70,8 +70,17 @@ ipcMain.handle('slidepilot:settings', async (event, action, args) => {
   if (action === 'ready') return ready()
   if (action === 'read') return host('settings_read')
   if (action === 'write') {
-    if (!Number.isInteger(args?.theme) || args.theme < 0 || args.theme > 2) throw Error('Choose an icon palette.')
-    return host('settings_write', { theme: args.theme })
+    const value = {}
+    if (Object.prototype.hasOwnProperty.call(args || {}, 'theme')) {
+      if (!Number.isInteger(args.theme) || args.theme < 0 || args.theme > 2) throw Error('Choose an icon palette.')
+      value.theme = args.theme
+    }
+    if (Object.prototype.hasOwnProperty.call(args || {}, 'mode')) {
+      if (!['sidebar', 'window'].includes(args.mode)) throw Error('Choose an assistant display mode.')
+      value.mode = args.mode
+    }
+    if (!Object.keys(value).length) throw Error('No settings were selected.')
+    return host('settings_write', value)
   }
   if (action === 'provider') return host('settings_provider')
   if (action === 'open') {
@@ -101,9 +110,10 @@ app.whenReady().then(() => {
     event.preventDefault(); win.hide(); clearTimeout(idle)
     idle = setTimeout(() => { if (!win.isVisible()) app.quit() }, 120000); idle.unref()
   })
-  win.on('show', () => clearTimeout(idle))
+  win.on('show', () => { clearTimeout(idle); win.webContents.send('slidepilot:settings-refresh') })
   win.hookWindowMessage(0x8047, () => {
     clearTimeout(idle); if (win.isMinimized()) win.restore(); win.show(); win.focus()
+    win.webContents.send('slidepilot:settings-refresh')
     ready().catch(() => {})
   })
   win.once('ready-to-show', () => { win.show(); ready().catch(() => {}) })

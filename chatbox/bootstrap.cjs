@@ -116,6 +116,7 @@ function host(action, fields = {}) {
   return request
 }
 let providerRevision = -1
+const windowModes = require('./window-mode-main.cjs').createWindowModes({ primary: () => primary, host })
 let workspaceBinding = Promise.resolve()
 ipcMain.handle('slidepilot:bind-workspace', (event, workspaceId) => {
   trusted(event)
@@ -126,6 +127,7 @@ ipcMain.handle('slidepilot:bind-workspace', (event, workspaceId) => {
   return next.then(applyHostState)
 })
 function applyHostState(result) {
+  windowModes.apply(result)
   if (result?.provider && result.revision !== providerRevision && primary && !primary.isDestroyed()) {
     providerRevision = result.revision
     if (primary.isMinimized()) primary.restore()
@@ -139,6 +141,10 @@ ipcMain.handle('slidepilot:controls', async (event, action) => {
   trusted(event)
   if (!['ping','ui_workspace','ui_approval','ui_settings'].includes(action)) throw Error('Unknown control')
   return applyHostState(await host(action))
+})
+ipcMain.handle('slidepilot:mode', async (event, mode) => {
+  trusted(event)
+  return windowModes.change(mode)
 })
 const handle = ipcMain.handle.bind(ipcMain)
 ipcMain.handle = (channel, handler) => {
@@ -163,8 +169,21 @@ ipcMain.handle = (channel, handler) => {
 app.on('browser-window-created', (_event, window) => {
   if (primary) return
   primary = window
+  window.setMinimumSize(320, 240)
+  window.hookWindowMessage(0x8047, () => {
+    if (window.isMinimized()) window.restore()
+    window.show()
+    window.focus()
+  })
   window.webContents.on('will-navigate', (event, url) => { if (!url.startsWith('file:')) event.preventDefault() })
-  window.once('ready-to-show', () => startupLog('Assistant window ready'))
+  window.once('ready-to-show', async () => {
+    startupLog('Assistant window ready')
+    try { await windowModes.ready() }
+    catch (error) {
+      startupLog('Assistant host attachment failed: ' + error.message)
+      dialog.showErrorBox('SlidePilot', 'The assistant could not attach to PowerPoint. Keep PowerPoint open and try switching the window mode again.\n' + error.message)
+    }
+  })
   window.webContents.on('did-fail-load', (_event, code, description, _url, isMainFrame) => {
     if (isMainFrame && code !== -3) {
       startupLog('Renderer load failed: ' + code + ' ' + description)

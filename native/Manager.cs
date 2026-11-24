@@ -5,16 +5,27 @@ using System.Reflection;
 using System.Diagnostics;
 using System.Security.Principal;
 using System.Security.AccessControl;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.RegularExpressions;
 using Microsoft.Win32;
 
 namespace SlidePilot {
     public static class Manager {
         public const string ProgId="SlidePilot.PowerPoint";
         public const string ClassId="{FB9007D1-2CB9-4C9D-8FC4-4A96CA980A3E}";
+        public const string PaneProgId="SlidePilot.AiPane";
+        public const string PaneClassId="{CDA982C6-857A-47C2-89D4-CA6FDD533BC7}";
         const string Classes=@"Software\Classes\";
         const string Addins=@"Software\Microsoft\Office\PowerPoint\Addins\";
         const string Deployment=@"Software\SlidePilot\Deployment";
-        static readonly string[] Keys={Classes+@"CLSID\"+ClassId,Classes+ProgId,Addins+ProgId};
+        // Keep the first three indexes stable for older deployment journals.
+        static readonly string[] Keys={Classes+@"CLSID\"+ClassId,Classes+ProgId,Addins+ProgId,Classes+@"CLSID\"+PaneClassId,Classes+PaneProgId};
+        static readonly int[] ComKeyIndexes={0,3};
+        static readonly int[] ProgKeyIndexes={1,4};
+        static readonly string[] ComClasses={"SlidePilot.Connect","SlidePilot.AiPane"};
+        static readonly string[] ComIds={ClassId,PaneClassId};
+        static readonly string[] ComProgIds={ProgId,PaneProgId};
         public static readonly RegistryView[] Views=Environment.Is64BitOperatingSystem ?
             new[]{RegistryView.Registry32,RegistryView.Registry64}:new[]{RegistryView.Registry32};
         class Snapshot {
@@ -88,11 +99,47 @@ namespace SlidePilot {
             try{return String.Equals(Path.GetFullPath(a.LocalPath),Path.GetFullPath(b.LocalPath),StringComparison.OrdinalIgnoreCase);}
             catch(ArgumentException){return false;}catch(NotSupportedException){return false;}catch(PathTooLongException){return false;}
         }
-        public static readonly string[] RequiredFiles={"SlidePilot.PowerPoint.dll","SlidePilot.Validate.exe","DocumentFormat.OpenXml.dll",@"Electron\electron.exe",@"Runtime\python.exe",@"Chatbox\bootstrap.cjs",@"Chatbox\dist\main\main.js",@"Chatbox\dist\renderer\index.html",@"Chatbox\workspace-main.cjs",@"Chatbox\settings-entry.cjs",@"Chatbox\settings-preload.cjs",@"Chatbox\settings.html",@"Chatbox\settings.css",@"Chatbox\settings.js",@"engine\server.py",@"engine\reference_server.py",@"engine\reference_files.py",@"assets\chart-members.json"};
+        public static readonly string[] RequiredFiles={"SlidePilot.PowerPoint.dll","SlidePilot.Manager.exe","SlidePilot.Setup.exe","SlidePilot.Validate.exe","DocumentFormat.OpenXml.dll",@"Electron\electron.exe",@"Runtime\python.exe",@"Chatbox\package.json",@"Chatbox\bootstrap.cjs",@"Chatbox\dist\main\main.js",@"Chatbox\dist\renderer\index.html",@"Chatbox\workspace-main.cjs",@"Chatbox\window-mode-main.cjs",@"Chatbox\settings-entry.cjs",@"Chatbox\settings-preload.cjs",@"Chatbox\settings.html",@"Chatbox\settings.css",@"Chatbox\settings.js",@"engine\server.py",@"engine\reference_server.py",@"engine\reference_files.py",@"assets\chart-members.json"};
         public static string[] MissingFiles(string dir) {
             var missing=new List<string>();
             foreach(string file in RequiredFiles) if(!File.Exists(Path.Combine(dir,file))) missing.Add(file);
             return missing.ToArray();
+        }
+        // Release verification is explicit; regular GUI refresh/install does not hash the whole runtime.
+        public static int ValidatePackage(string dir) {
+            dir=Path.GetFullPath(dir);
+            string manifest=Path.Combine(dir,"manifest.sha256");
+            if(!File.Exists(manifest) || new FileInfo(manifest).Length>16*1024*1024)throw new InvalidDataException("Missing or oversized manifest.sha256.");
+            var listed=new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            int count=0;
+            using(var reader=new StreamReader(manifest,new UTF8Encoding(false,true),false)) {
+                string line;
+                while((line=reader.ReadLine())!=null) {
+                    if(++count>50000 || !Regex.IsMatch(line,@"\A[0-9a-fA-F]{64}  .+\z"))throw new InvalidDataException("Invalid package manifest entry.");
+                    string relative=line.Substring(66);
+                    if(relative.Equals("manifest.sha256",StringComparison.OrdinalIgnoreCase) || !listed.Add(relative))throw new InvalidDataException("Duplicate or self-referential manifest entry: "+relative);
+                    string target=ManifestTarget(dir,relative);
+                    if(!File.Exists(target))throw new FileNotFoundException("Missing manifest file: "+relative);
+                    using(var stream=new FileStream(target,FileMode.Open,FileAccess.Read,FileShare.Read))using(var sha=SHA256.Create()) {
+                        string actual=BitConverter.ToString(sha.ComputeHash(stream)).Replace("-","");
+                        if(!actual.Equals(line.Substring(0,64),StringComparison.OrdinalIgnoreCase))throw new InvalidDataException("SHA-256 mismatch: "+relative);
+                    }
+                }
+            }
+            foreach(string file in RequiredFiles)if(!listed.Contains(file.Replace('\\','/')))throw new InvalidDataException("Required entry missing from package manifest: "+file);
+            return count;
+        }
+        static string ManifestTarget(string dir,string relative) {
+            if(String.IsNullOrEmpty(relative) || relative.IndexOfAny(new[]{'\\',':','*','?','"','<','>','|'})>=0)throw new InvalidDataException("Unsafe manifest path: "+relative);
+            string path=dir;
+            if((File.GetAttributes(path)&FileAttributes.ReparsePoint)!=0)throw new InvalidDataException("Linked package directory is not supported.");
+            foreach(string part in relative.Split('/')) {
+                if(part.Length==0 || part=="." || part==".." || part.TrimEnd(' ','.')!=part || Regex.IsMatch(part,@"[\x00-\x1f]") ||
+                   Regex.IsMatch(part,@"\A(?:CON|PRN|AUX|NUL|CONIN\$|CONOUT\$|COM[1-9¹²³]|LPT[1-9¹²³])(?:\.|\z)",RegexOptions.IgnoreCase))throw new InvalidDataException("Unsafe manifest path: "+relative);
+                path=Path.Combine(path,part);
+                if((File.GetAttributes(path)&FileAttributes.ReparsePoint)!=0)throw new InvalidDataException("Linked manifest entry is not supported: "+relative);
+            }
+            return path;
         }
         public static string MachinePathWarning(string dir) {
             string target=Path.GetFullPath(dir);
@@ -132,25 +179,47 @@ namespace SlidePilot {
                 using(var k=reg.OpenSubKey(Keys[0]+@"\InprocServer32")) return k==null?null:k.GetValue("CodeBase") as string;
             }
         }
+        public static bool RegistrationComplete(RegistryView view,string dir,bool machine) {
+            int behavior;
+            if(!SameCodebase(Registration(view,out behavior,machine),Codebase(dir)) || behavior!=3)return false;
+            using(var reg=RegistryKey.OpenBaseKey(Hive(machine),view))for(int i=0;i<ComClasses.Length;i++) {
+                using(var server=reg.OpenSubKey(Keys[ComKeyIndexes[i]]+@"\InprocServer32"))
+                    if(server==null || !SameCodebase(server.GetValue("CodeBase") as string,Codebase(dir)) || !Object.Equals(server.GetValue("Class"),ComClasses[i]) || !Object.Equals(server.GetValue(""),"mscoree.dll") || !Object.Equals(server.GetValue("ThreadingModel"),"Both"))return false;
+                using(var prog=reg.OpenSubKey(Keys[ProgKeyIndexes[i]]+@"\CLSID"))
+                    if(prog==null || !String.Equals(prog.GetValue("") as string,ComIds[i],StringComparison.OrdinalIgnoreCase))return false;
+                using(var category=reg.OpenSubKey(Keys[ComKeyIndexes[i]]+@"\Implemented Categories\{62C8FE65-4EBB-45E7-B440-6E39B2CDBF29}"))if(category==null)return false;
+                if(i==1) {
+                    using(var control=reg.OpenSubKey(Keys[ComKeyIndexes[i]]+@"\Control"))if(control==null)return false;
+                    using(var category=reg.OpenSubKey(Keys[ComKeyIndexes[i]]+@"\Implemented Categories\{40FC6ED4-2438-11CF-A3DB-080036F12502}"))if(category==null)return false;
+                }
+            }
+            return true;
+        }
         static void Enable(RegistryKey baseKey,string dir) {
             string dll=Path.Combine(dir,"SlidePilot.PowerPoint.dll");
             var ass=AssemblyName.GetAssemblyName(dll);
-            using(var cls=baseKey.CreateSubKey(Keys[0])) {
-                cls.SetValue("","SlidePilot.Connect");
-                using(var id=cls.CreateSubKey("ProgId")) id.SetValue("",ProgId);
+            for(int i=0;i<ComClasses.Length;i++) {
+            using(var cls=baseKey.CreateSubKey(Keys[ComKeyIndexes[i]])) {
+                cls.SetValue("",ComClasses[i]);
+                using(var id=cls.CreateSubKey("ProgId")) id.SetValue("",ComProgIds[i]);
                 using(var category=cls.CreateSubKey(@"Implemented Categories\{62C8FE65-4EBB-45E7-B440-6E39B2CDBF29}")) {}
+                if(i==1) {
+                    using(var control=cls.CreateSubKey("Control")) {}
+                    using(var category=cls.CreateSubKey(@"Implemented Categories\{40FC6ED4-2438-11CF-A3DB-080036F12502}")) {}
+                }
                 using(var server=cls.CreateSubKey("InprocServer32")) {
                     server.SetValue("","mscoree.dll");
                     server.SetValue("ThreadingModel","Both");
                     using(var version=server.CreateSubKey(ass.Version.ToString())) foreach(var k in new[]{server,version}) {
-                        k.SetValue("Class","SlidePilot.Connect"); k.SetValue("Assembly",ass.FullName);
+                        k.SetValue("Class",ComClasses[i]); k.SetValue("Assembly",ass.FullName);
                         k.SetValue("RuntimeVersion","v4.0.30319"); k.SetValue("CodeBase",Codebase(dir));
                     }
                 }
             }
-            using(var p=baseKey.CreateSubKey(Keys[1])) {
-                p.SetValue("","SlidePilot.Connect");
-                using(var clsid=p.CreateSubKey("CLSID"))clsid.SetValue("",ClassId);
+            using(var p=baseKey.CreateSubKey(Keys[ProgKeyIndexes[i]])) {
+                p.SetValue("",ComClasses[i]);
+                using(var clsid=p.CreateSubKey("CLSID"))clsid.SetValue("",ComIds[i]);
+            }
             }
             using(var a=baseKey.CreateSubKey(Keys[2])) {
                 a.SetValue("LoadBehavior",3,RegistryValueKind.DWord); a.SetValue("FriendlyName","SlidePilot");
@@ -159,10 +228,8 @@ namespace SlidePilot {
         }
         public static int Main(string[] args) {
             if(args.Length==1 && args[0]=="check-package") {
-                var missing=MissingFiles(AppDomain.CurrentDomain.BaseDirectory);
-                if(missing.Length>0){Console.Error.WriteLine("Incomplete package: "+String.Join(", ",missing));return 1;}
-                Console.WriteLine("Portable package entry points present.");
-                return 0;
+                try {int files=ValidatePackage(AppDomain.CurrentDomain.BaseDirectory);Console.WriteLine("Portable package SHA-256 verified: "+files+" files.");return 0;}
+                catch(Exception e){Console.Error.WriteLine(e.Message);return 1;}
             }
             bool machine=false,replace=false,valid=args.Length>0 && Array.IndexOf(new[]{"enable","disable","status","rollback"},args[0])>=0;
             for(int i=1;i<args.Length;i++) {
@@ -182,7 +249,7 @@ namespace SlidePilot {
             return result;
         }
         static void RestoreEntries(bool machine,List<Entry> entries) {
-            // Each target is selected from the three owned registration keys, never from backup data.
+            // Each target is selected from the fixed owned registration keys, never from backup data.
             foreach(var entry in entries)using(var reg=RegistryKey.OpenBaseKey(Hive(machine),entry.View)) {
                 reg.DeleteSubKeyTree(Keys[entry.Index],false);
                 if(entry.Before!=null)using(var key=reg.CreateSubKey(Keys[entry.Index]))entry.Before.Restore(key);
@@ -194,13 +261,15 @@ namespace SlidePilot {
         }
         static void CheckOwnership(bool machine) {
             foreach(var view in Views)using(var reg=RegistryKey.OpenBaseKey(Hive(machine),view)) {
-                using(var key=reg.OpenSubKey(Keys[0]+@"\InprocServer32")) {
+                for(int i=0;i<ComClasses.Length;i++) {
+                using(var key=reg.OpenSubKey(Keys[ComKeyIndexes[i]]+@"\InprocServer32")) {
                     string cls=key==null?null:Convert.ToString(key.GetValue("Class"));
-                    if(!String.IsNullOrEmpty(cls) && cls!="SlidePilot.Connect")throw new IOException("SlidePilot CLSID belongs to another component. No registration will be replaced.");
+                    if(!String.IsNullOrEmpty(cls) && cls!=ComClasses[i])throw new IOException("SlidePilot CLSID belongs to another component: "+ComIds[i]+". No registration will be replaced.");
                 }
-                using(var key=reg.OpenSubKey(Keys[1]+@"\CLSID")) {
+                using(var key=reg.OpenSubKey(Keys[ProgKeyIndexes[i]]+@"\CLSID")) {
                     string id=key==null?null:Convert.ToString(key.GetValue(""));
-                    if(!String.IsNullOrEmpty(id) && !String.Equals(id,ClassId,StringComparison.OrdinalIgnoreCase))throw new IOException("SlidePilot ProgID points to another component. No registration will be replaced.");
+                    if(!String.IsNullOrEmpty(id) && !String.Equals(id,ComIds[i],StringComparison.OrdinalIgnoreCase))throw new IOException("SlidePilot ProgID points to another component: "+ComProgIds[i]+". No registration will be replaced.");
+                }
                 }
                 using(var key=reg.OpenSubKey(Keys[2])) {
                     string name=key==null?null:Convert.ToString(key.GetValue("FriendlyName"));
@@ -214,6 +283,7 @@ namespace SlidePilot {
         }
         static string EntryName(Entry entry) {return entry.View.ToString()+"-"+entry.Index;}
         static void WriteSnapshot(RegistryKey key,string name,Snapshot snapshot) {
+            key.DeleteSubKeyTree(name,false);
             key.SetValue(name+"Exists",snapshot==null?0:1,RegistryValueKind.DWord);
             if(snapshot!=null)using(var child=key.CreateSubKey(name))snapshot.Restore(child);
         }
@@ -232,7 +302,7 @@ namespace SlidePilot {
                 if(state!="complete")reg.DeleteSubKeyTree(Deployment,false);
                 using(var journal=reg.CreateSubKey(Deployment)) {
                     if(state!="complete") {
-                        journal.SetValue("Format",2,RegistryValueKind.DWord);journal.SetValue("State",state);journal.SetValue("Target",Codebase(dir));
+                        journal.SetValue("Format",3,RegistryValueKind.DWord);journal.SetValue("KeyCount",Keys.Length,RegistryValueKind.DWord);journal.SetValue("State",state);journal.SetValue("Target",Codebase(dir));
                         journal.SetValue("CreatedUtc",DateTime.UtcNow.ToString("o"));
                         journal.SetValue("MachineScope",machine?1:0,RegistryValueKind.DWord);
                         journal.SetValue("MigratedUser",migrated==null?0:1,RegistryValueKind.DWord);
@@ -262,11 +332,13 @@ namespace SlidePilot {
             migrated=null;sid=null;
             using(var reg=RegistryKey.OpenBaseKey(Hive(machine),JournalView))using(var journal=reg.OpenSubKey(Deployment)) {
                 int format=journal==null?0:Convert.ToInt32(journal.GetValue("Format",0));
-                if(format!=1 && format!=2)throw new InvalidOperationException("No SlidePilot rollback point is available for this scope.");
-                if(format==2 && Convert.ToInt32(journal.GetValue("MachineScope",-1))!=(machine?1:0))throw new IOException("Deployment backup scope does not match this operation.");
+                if(format<1 || format>3)throw new InvalidOperationException("No SlidePilot rollback point is available for this scope.");
+                if(format>=2 && Convert.ToInt32(journal.GetValue("MachineScope",-1))!=(machine?1:0))throw new IOException("Deployment backup scope does not match this operation.");
+                int keyCount=format<3?3:Convert.ToInt32(journal.GetValue("KeyCount",-1));
+                if((format<3 && keyCount!=3) || (format==3 && keyCount!=Keys.Length))throw new IOException("Deployment backup key inventory is invalid.");
                 state=journal.GetValue("State","") as string;target=journal.GetValue("Target","") as string;
-                entries=ReadEntries(journal);
-                if(format==2) {
+                entries=ReadEntries(journal,keyCount);
+                if(format>=2) {
                     int marker=Convert.ToInt32(journal.GetValue("MigratedUser",-1));
                     if(marker!=0 && marker!=1)throw new IOException("Invalid user migration marker in deployment backup.");
                     if(marker==1) {
@@ -274,7 +346,7 @@ namespace SlidePilot {
                         if(!machine || String.IsNullOrEmpty(sid))throw new IOException("Invalid user migration scope in deployment backup.");
                         using(var users=journal.OpenSubKey("UserEntries")) {
                             if(users==null)throw new IOException("The user migration backup is incomplete.");
-                            migrated=ReadEntries(users);
+                            migrated=ReadEntries(users,keyCount);
                         }
                         if(migrated.Exists(entry=>entry.After!=null))throw new IOException("Invalid migration result in deployment backup.");
                     }
@@ -282,10 +354,12 @@ namespace SlidePilot {
             }
             return entries;
         }
-        static List<Entry> ReadEntries(RegistryKey journal) {
+        static List<Entry> ReadEntries(RegistryKey journal,int knownKeyCount) {
             var entries=new List<Entry>();
             foreach(var view in Views)for(int index=0;index<Keys.Length;index++) {
                 var entry=new Entry{View=view,Index=index};
+                // Old releases had no AiPane registration; its Before/After are absent.
+                if(index>=knownKeyCount){entries.Add(entry);continue;}
                 using(var key=journal.OpenSubKey(EntryName(entry))) {
                     if(key==null)throw new IOException("Incomplete deployment backup. No registry changes were made.");
                     entry.Before=ReadSnapshot(key,"Before");entry.After=ReadSnapshot(key,"After");
@@ -301,7 +375,7 @@ namespace SlidePilot {
             output.WriteLine("Previous deployment backup archived: "+(machine?"HKLM":"HKCU")+@"\"+path);
         }
         static void ValidateOldDll(List<Entry> entries) {
-            foreach(var entry in entries)if(entry.Index==0 && entry.Before!=null) {
+            foreach(var entry in entries)if(Array.IndexOf(ComKeyIndexes,entry.Index)>=0 && entry.Before!=null) {
                 Snapshot server;object value;
                 if(entry.Before.Children.TryGetValue("InprocServer32",out server) && server.Values.TryGetValue("CodeBase",out value)) {
                     Uri uri;
@@ -310,6 +384,10 @@ namespace SlidePilot {
             }
         }
         static bool MatchesJournal(bool machine,List<Entry> actual,string dir) {
+            // Adding COM classes changes the saved inventory. Preserve old journals only for rollback;
+            // a new enable must capture the pre-upgrade registration and its complete new After state.
+            using(var reg=RegistryKey.OpenBaseKey(Hive(machine),JournalView))using(var journal=reg.OpenSubKey(Deployment))
+                if(journal==null || Convert.ToInt32(journal.GetValue("Format",0))!=3)return false;
             string state,target,sid;List<Entry> previous,migrated;
             try{previous=ReadJournal(machine,out state,out target,out migrated,out sid);}catch(IOException){return false;}catch(InvalidOperationException){return false;}
             if(state!="complete" || !SameCodebase(target,Codebase(dir)))return false;
@@ -355,6 +433,11 @@ namespace SlidePilot {
                     int behavior;string existing=Registration(view,out behavior,machine);
                     sameLocation &= SameCodebase(existing,Codebase(dir));
                     if(verb=="disable" && existing!=null && !SameCodebase(existing,Codebase(dir)))throw new InvalidOperationException("A different SlidePilot location is registered. Disable it from that folder.");
+                    if(verb=="disable")using(var reg=RegistryKey.OpenBaseKey(Hive(machine),view))foreach(int index in ComKeyIndexes)
+                        using(var key=reg.OpenSubKey(Keys[index]+@"\InprocServer32")) {
+                            string source=key==null?null:key.GetValue("CodeBase") as string;
+                            if(source!=null && !SameCodebase(source,Codebase(dir)))throw new InvalidOperationException("A SlidePilot COM component belongs to a different folder. Disable it from that folder.");
+                        }
                 }
                 using(var reg=RegistryKey.OpenBaseKey(Hive(machine),JournalView))using(var key=reg.OpenSubKey(Deployment))journalBefore=Snapshot.Read(key);
                 history=Capture(machine);
@@ -384,7 +467,14 @@ namespace SlidePilot {
                         if(journalBefore.Values.TryGetValue("State",out state) && !Object.Equals(state,"complete"))throw new InvalidOperationException("An interrupted deployment backup exists. Recover it before changing registration.");
                     }
                     if(!savePoint && !MatchesJournal(machine,history,dir))savePoint=true;
+                    List<Entry> savedEntries=history,savedUsers=historyUser;
                     if(savePoint){ArchiveJournal(machine,journalBefore,output);journalTouched=true;SaveJournal(machine,history,dir,"pending",historyUser);}
+                    else {
+                        string state,target,sid;
+                        savedEntries=ReadJournal(machine,out state,out target,out savedUsers,out sid);
+                        journalTouched=true;
+                        using(var reg=RegistryKey.OpenBaseKey(Hive(machine),JournalView))using(var key=reg.OpenSubKey(Deployment,true)){key.SetValue("State","pending");key.Flush();}
+                    }
                     changed=true;
                     if(historyUser!=null) {
                         foreach(var view in Views)using(var reg=RegistryKey.OpenBaseKey(RegistryHive.CurrentUser,view))foreach(string path in Keys)reg.DeleteSubKeyTree(path,false);
@@ -396,10 +486,12 @@ namespace SlidePilot {
                         else foreach(string path in Keys)reg.DeleteSubKeyTree(path,false);
                     }
                     foreach(var view in Views) {
-                        int behavior;string actual=Registration(view,out behavior,machine);
-                        if(verb=="enable"? !SameCodebase(actual,Codebase(dir))||behavior!=3 : actual!=null||behavior!=-1)throw new IOException("Registration read-back failed: "+view);
+                        if(verb=="enable" && !RegistrationComplete(view,dir,machine))throw new IOException("Registration read-back failed: "+view);
                     }
-                    if(savePoint) {var after=Capture(machine);for(int i=0;i<history.Count;i++)history[i].After=after[i].Before;SaveJournal(machine,history,dir,"complete",historyUser);}
+                    if(verb=="disable" && HasRegistration(machine))throw new IOException("Registration removal read-back failed.");
+                    // Retain the original Before, but refresh After even for an idempotent repair.
+                    var after=Capture(machine);for(int i=0;i<savedEntries.Count;i++)savedEntries[i].After=after[i].Before;
+                    SaveJournal(machine,savedEntries,dir,"complete",savedUsers);
                 }
                 output.WriteLine("SlidePilot "+verb+" completed. Reopen PowerPoint.");
                 return 0;

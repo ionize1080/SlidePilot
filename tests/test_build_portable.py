@@ -129,7 +129,7 @@ class OfflinePackageTests(unittest.TestCase):
         (chat / "package-lock.json").write_bytes(self.lock.read_bytes())
         (chat / "package.json").write_text("{}")
         (chat / "bootstrap.cjs").write_bytes(b"current bootstrap")
-        for filename in ("workspace-main.cjs", "settings-entry.cjs", "settings-preload.cjs", "settings.html", "settings.css", "settings.js"):
+        for filename in ("workspace-main.cjs", "window-mode-main.cjs", "settings-entry.cjs", "settings-preload.cjs", "settings.html", "settings.css", "settings.js"):
             (chat / filename).write_text(filename)
         upstream = source / ".build/chatbox"
         (upstream / "release/app/dist/renderer").mkdir(parents=True)
@@ -150,9 +150,11 @@ class OfflinePackageTests(unittest.TestCase):
         def finalize(out):
             self.assertEqual((out / "Chatbox/bootstrap.cjs").read_bytes(), b"current bootstrap")
             self.assertTrue((out / "Chatbox/workspace-main.cjs").is_file())
+            self.assertTrue((out / "Chatbox/window-mode-main.cjs").is_file())
             self.assertTrue((out / "Chatbox/settings.html").is_file())
             self.assertEqual((out / "Chatbox/dist/renderer/index.html").read_bytes(), b"current renderer")
             self.assertEqual((out / "SlidePilot.PowerPoint.dll").read_bytes(), b"current native")
+            self.assertTrue((out / "manifest.sha256").is_file())
             return self.base
 
         with mock.patch.object(build, "ROOT", source), mock.patch.object(build, "DIST", self.root / "dist"), \
@@ -166,6 +168,41 @@ class OfflinePackageTests(unittest.TestCase):
             build.main()
         self.assertEqual(run.call_count, 2)
         self.assertEqual([Path(call.args[0]).name for call in run.call_args_list], ["python.exe", "SlidePilot.Manager.exe"])
+
+    def test_manifest_is_complete_and_repeatable_without_self_hash(self):
+        (self.out / "Runtime").mkdir()
+        (self.out / "Runtime/python.exe").write_bytes(b"python")
+        (self.out / "readme.txt").write_text("readme")
+        files = build.write_manifest(self.out)
+        manifest = (self.out / "manifest.sha256").read_bytes()
+        self.assertEqual({p.relative_to(self.out).as_posix() for p in files}, {"Runtime/python.exe", "readme.txt"})
+        self.assertNotIn(b"manifest.sha256", manifest)
+        build.write_manifest(self.out)
+        self.assertEqual((self.out / "manifest.sha256").read_bytes(), manifest)
+        (self.out / "readme.txt").write_text("changed")
+        build.write_manifest(self.out)
+        self.assertNotEqual((self.out / "manifest.sha256").read_bytes(), manifest)
+
+    def test_archive_manifest_covers_exact_final_payload(self):
+        (self.out / "payload.txt").write_bytes(b"new")
+        (self.out / "manifest.sha256").write_text("old manifest")
+        with mock.patch.object(build, "DIST", self.root):
+            archive = build.archive_project(self.out)
+        with ZipFile(archive) as z:
+            manifest = z.read("SlidePilot/manifest.sha256").decode()
+            self.assertEqual(manifest.strip(), hashlib.sha256(b"new").hexdigest() + "  payload.txt")
+            self.assertEqual(set(z.namelist()), {"SlidePilot/payload.txt", "SlidePilot/manifest.sha256"})
+
+    def test_build_native_includes_pane_and_both_deployment_executables(self):
+        (self.root / "OpenXml.dll").write_bytes(b"SDK placeholder")
+        with mock.patch.object(build, "run") as run, \
+             mock.patch.dict(build.os.environ, {"WINDIR": str(self.root / "Windows")}), \
+             mock.patch.object(Path, "glob", side_effect=[iter([self.root / "office.dll"]), iter([self.root / "Extensibility.dll"])]):
+            build.build_native(self.out, self.root / "OpenXml.dll")
+        native_args = [str(arg) for arg in run.call_args_list[0].args]
+        self.assertIn(str(build.ROOT / "native/AiPane.cs"), native_args)
+        self.assertTrue(any("SlidePilot.Manager.exe" in str(a) for a in run.call_args_list[1].args))
+        self.assertTrue(any("SlidePilot.Setup.exe" in str(a) for a in run.call_args_list[2].args))
 
 
 if __name__ == "__main__":

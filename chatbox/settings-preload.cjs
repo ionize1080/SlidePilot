@@ -7,4 +7,9 @@ contextBridge.exposeInMainWorld('slidepilotSettings', {
   provider: () => ipcRenderer.invoke('slidepilot:settings', 'provider'),
   open: target => ipcRenderer.invoke('slidepilot:settings', 'open', { target }),
   workspace: value => ipcRenderer.invoke('slidepilot:workspace-preferences', value),
+  onRefresh: callback => {
+    const listener = () => callback()
+    ipcRenderer.on('slidepilot:settings-refresh', listener)
+    return () => ipcRenderer.removeListener('slidepilot:settings-refresh', listener)
+  },
 })

@@ -3,6 +3,75 @@ from pathlib import Path
 import shutil
 
 HOOKS = [
+    ("src/renderer/components/layout/Page.tsx",
+     '  right?: React.ReactNode\n}',
+     '  right?: React.ReactNode\n  className?: string\n}'),
+    ("src/renderer/components/layout/Page.tsx",
+     'export const Page: FC<PageProps> = ({ children, title, left, right }) => {',
+     'export const Page: FC<PageProps> = ({ children, title, left, right, className }) => {'),
+    ("src/renderer/components/layout/Page.tsx",
+     '<div className="flex flex-col h-full">',
+     '<div className={clsx("flex flex-col h-full", className)}>'),
+    ("src/renderer/components/layout/Page.tsx",
+     '<div className="flex-1 overflow-auto">{children}</div>',
+     '<div className="flex-1 overflow-auto sp-page-content">{children}</div>'),
+    ("src/renderer/routes/index.tsx",
+     '<Page title="">',
+     '<Page title="" className="sp-home-page">'),
+    ("src/renderer/routes/index.tsx",
+     '<div className="p-0 flex flex-col h-full">',
+     '<div className="p-0 flex flex-col h-full sp-home">\n        <div className="sp-sidebar-setup"><strong>SlidePilot</strong><button type="button" onClick={() => navigateToSettings(\'/provider\')}>{language.startsWith(\'zh\') ? \'设置模型与 API\' : \'Model & API settings\'}</button></div>'),
+    ("src/renderer/routes/index.tsx",
+     '<Stack align="center" justify="center" gap="sm" flex={1}>',
+     '<Stack align="center" justify="center" gap="sm" flex={1} className="sp-home-welcome">'),
+    ("src/renderer/routes/index.tsx",
+     '<Stack align="center" justify="center" gap="sm" flex={1} p="sm">',
+     '<Stack align="center" justify="center" gap="sm" flex={1} p="sm" className="sp-home-welcome">'),
+    ("src/renderer/routes/index.tsx",
+     "{welcomeCardMode !== 'none' && (\n          <Box px=\"sm\">",
+     "{welcomeCardMode !== 'none' && (\n          <Box px=\"sm\" className=\"sp-home-promotion\">"),
+    ("src/renderer/routes/index.tsx",
+     '<Stack gap="sm">\n          {session.copilotId ? (',
+     '<Stack gap="sm" className="sp-home-composer">\n          {session.copilotId ? ('),
+    ("src/renderer/routes/index.tsx",
+     'return (\n    <Box px="md">\n      <Stack gap="xs"',
+     'return (\n    <Box px="md" className="sp-home-copilot-picker">\n      <Stack gap="xs"'),
+    ("src/renderer/routes/session/$sessionId.tsx",
+     '<div className="flex flex-col h-full">',
+     '<div className="flex flex-col h-full sp-session-root">'),
+    ("src/renderer/components/chat/MessageList.tsx",
+     "<div className={cn('w-full h-full mx-auto', props.className)}>",
+     "<div className={cn('w-full h-full mx-auto sp-message-list', props.className)}>"),
+    ("src/renderer/components/InputBox/InputBox.tsx",
+     '<Box pt={0} pb={isSmallScreen ? \'md\' : \'sm\'} px="sm" id={dom.InputBoxID} {...getRootProps()}>',
+     '<Box pt={0} pb={isSmallScreen ? \'md\' : \'sm\'} px="sm" className="sp-composer" id={dom.InputBoxID} {...getRootProps()}>'),
+    ("src/renderer/routes/__root.tsx",
+     'className="h-full w-full"',
+     'className="h-full w-full sp-main-column"'),
+    ("src/renderer/components/layout/Header.tsx",
+     'className="min-w-0"',
+     'className="min-w-0 sp-chat-heading"'),
+    ("src/renderer/components/layout/Header.tsx",
+     '<Text fw={600} size="18px" lineClamp={1}>',
+     '<Text fw={600} size="18px" lineClamp={1} className="min-w-0 sp-chat-title">'),
+    ("src/renderer/components/layout/Header.tsx",
+     'className="flex-shrink-0"',
+     'className="flex-shrink-0 sp-thread-label"'),
+    ("src/renderer/components/layout/Header.tsx",
+     '<Tooltip label={t(\'Customize settings for the current conversation\')}>\n            <ActionIcon\n              className="controls"',
+     '<Tooltip label={t(\'Customize settings for the current conversation\')}>\n            <ActionIcon\n              className="controls sp-chat-title-edit"'),
+    ("src/renderer/routes/__root.tsx",
+     "import '@/modals'",
+     "import '@/modals'\nimport '@/packages/slidepilot/window-mode'"),
+    ("src/renderer/components/InputBox/InputBox.tsx",
+     '<Flex align="center" gap={0} className="shrink-0 w-full" justify="space-between">',
+     '<Flex align="center" gap={0} className="shrink-0 w-full sp-input-toolbar" justify="space-between">'),
+    ("src/renderer/components/InputBox/InputBox.tsx",
+     '{/* Left Group: Tool Buttons */}\n              <Flex align="center" gap={0}>',
+     '{/* Left Group: Tool Buttons */}\n              <Flex align="center" gap={0} className="sp-input-tools">'),
+    ("src/renderer/components/InputBox/InputBox.tsx",
+     '{/* Right Group: Token Count + Model Selector */}\n              <Flex align="center" gap={0} className="min-w-0 ml-auto">',
+     '{/* Right Group: Token Count + Model Selector */}\n              <Flex align="center" gap={0} className="min-w-0 ml-auto sp-input-model">'),
     ("src/renderer/components/InputBox/InputBox.tsx",
      "import SlidePilotControls from './SlidePilotControls'",
      "import SlidePilotControls from './SlidePilotControls'\nimport { captureWorkspace } from '@/packages/slidepilot/workspace'"),
@@ -67,7 +136,7 @@ def apply(src: Path):
     root = Path(__file__).resolve().parent
     package = src / "src/renderer/packages/slidepilot"
     package.mkdir(parents=True, exist_ok=True)
-    for name in ("workspace.ts", "workspace-ui.js"):
+    for name in ("workspace.ts", "workspace-ui.js", "window-mode.ts", "sidebar.css"):
         shutil.copyfile(root / name, package / name)
     component = src / "src/renderer/components/InputBox"
     for name in ("SlidePilotControls.tsx", "SlidePilotControls.css"):
@@ -88,4 +157,7 @@ def append_preload(src: Path):
     addition = (Path(__file__).resolve().parent / "workspace-preload.cjs").read_text(encoding="utf-8")
     value = path.read_text(encoding="utf-8")
     if "exposeInMainWorld('slidepilotFiles'" not in value:
-        path.write_text(value + "\n" + addition, encoding="utf-8")
+        value += "\n" + addition
+    if "Window controls adapted from PagePilot preload.cjs" not in value:
+        value += "\n" + (Path(__file__).resolve().parent / "window-mode-preload.cjs").read_text(encoding="utf-8")
+    path.write_text(value, encoding="utf-8")

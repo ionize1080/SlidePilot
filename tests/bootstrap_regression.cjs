@@ -4,7 +4,7 @@ let factories=[],created=0;
 const sockets=[];
 const fakeNet={createConnection(){const s=new EventEmitter();s.setEncoding=()=>{};s.destroy=()=>{};s.write=()=>{};sockets.push(s);created++;queueMicrotask(()=>factories.shift()(s));return s;}};
 const env={SLIDEPILOT_PIPE:'SlidePilot-'+'a'.repeat(32),SLIDEPILOT_TOKEN:'A'.repeat(64),SLIDEPILOT_UI_TOKEN:'B'.repeat(64)};
-const context={require(name){if(name==='electron')return {app,ipcMain:{handle(){}},dialog:{showErrorBox(){}}};if(name==='node:net')return fakeNet;if(name==='node:fs')return {mkdirSync(){},existsSync(){return false;},appendFileSync(){}};if(name==='node:path')return require(name);if(name==='./workspace-main.cjs')return {install(){}};if(name==='./dist/main/main.js')return {};throw Error(name);},__dirname:'.',process:{env,versions:{electron:'test'},kill(){}},setTimeout:(fn,ms)=>setTimeout(fn,ms===5500?15:ms),clearTimeout,setInterval:()=>({unref(){}}),console};
+const context={require(name){if(name==='electron')return {app,ipcMain:{handle(){}},dialog:{showErrorBox(){}}};if(name==='node:net')return fakeNet;if(name==='node:fs')return {mkdirSync(){},existsSync(){return false;},appendFileSync(){}};if(name==='node:path')return require(name);if(name==='./workspace-main.cjs')return {install(){}};if(name==='./window-mode-main.cjs')return require('../chatbox/window-mode-main.cjs');if(name==='./dist/main/main.js')return {};throw Error(name);},__dirname:'.',process:{env,versions:{electron:'test'},kill(){}},setTimeout:(fn,ms)=>setTimeout(fn,ms===5500?15:ms),clearTimeout,setInterval:()=>({unref(){}}),console};
 vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../chatbox/bootstrap.cjs'),'utf8')+'\nglobalThis.test={host,config};',context);
 const {host}=context.test;
 (async()=>{

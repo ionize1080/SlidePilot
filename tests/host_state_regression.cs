@@ -60,6 +60,45 @@ class HostStateRegression {
         Assert(!request(()=>{bind(firstId,"fixture-ui-token");return true;}),"Workspace changes during confirmation must invalidate that confirmation.");
         var context=handle.Invoke(host,new object[]{new Dictionary<string,object>{{"action","context"}}});
         Assert((string)context.GetType().GetProperty("workspaceId").GetValue(context,null)==firstId,"Tool context must expose the current UI workspace binding.");
+        Assert(Array.Exists(type.GetInterfaces(),item=>item.Name=="ICustomTaskPaneConsumer"),"Office must be able to provide its custom task pane factory.");
+        var initialMode=state.Invoke(host,new object[]{false});Assert((string)initialMode.GetType().GetProperty("mode").GetValue(initialMode,null)=="window","Initial assistant state must report floating-window mode.");
+        bool deniedMode=false;try{handle.Invoke(host,new object[]{new Dictionary<string,object>{{"action","ai_mode"},{"mode","sidebar"},{"uiToken","incorrect"}}});}catch(TargetInvocationException e){deniedMode=e.InnerException is UnauthorizedAccessException;}
+        Assert(deniedMode,"MCP callers must not be able to switch assistant mode.");
+        app.Presentations.Count=0;bool noDocument=false;try{handle.Invoke(host,new object[]{new Dictionary<string,object>{{"action","ai_mode"},{"mode","sidebar"},{"uiToken","fixture-ui-token"}}});}catch(TargetInvocationException e){noDocument=e.InnerException is InvalidOperationException;}
+        Assert(noDocument && (string)type.GetField("aiMode",Private).GetValue(host)=="window","An unavailable document must leave window mode unchanged.");app.Presentations.Count=1;
+        bool unavailableFactory=false;try{handle.Invoke(host,new object[]{new Dictionary<string,object>{{"action","ai_mode"},{"mode","sidebar"},{"uiToken","fixture-ui-token"}}});}catch(TargetInvocationException e){unavailableFactory=e.InnerException is InvalidOperationException;}
+        Assert(unavailableFactory && (string)type.GetField("aiMode",Private).GetValue(host)=="window","A missing Office pane factory must not persist a false sidebar preference.");
+        bool invalidWindow=false;try{handle.Invoke(host,new object[]{new Dictionary<string,object>{{"action","ai_ready"},{"handle","0"},{"uiToken","fixture-ui-token"}}});}catch(TargetInvocationException e){invalidWindow=e.InnerException is UnauthorizedAccessException;}
+        Assert(invalidWindow && (IntPtr)type.GetField("aiHandle",Private).GetValue(host)==IntPtr.Zero,"Invalid ready handles must not become the assistant window or dialog owner.");
+        var transition=assembly.GetType("SlidePilot.AiModeTransition",true).GetMethod("Change",BindingFlags.Static|BindingFlags.NonPublic);
+        var calls=new List<string>();Action<string> apply=value=>calls.Add("apply:"+value),persist=value=>calls.Add("save:"+value);
+        var docked=(string)transition.Invoke(null,new object[]{"window","sidebar",apply,persist});
+        Assert(docked=="sidebar" && String.Join(",",calls)=="apply:sidebar,save:sidebar","Docking must apply the live window before persisting its mode.");
+        calls.Clear();var floating=(string)transition.Invoke(null,new object[]{"sidebar","window",apply,persist});
+        Assert(floating=="window" && String.Join(",",calls)=="apply:window,save:window","Undocking must apply to the same window before persisting.");
+        calls.Clear();bool invalidMode=false;try{transition.Invoke(null,new object[]{"window","invalid",apply,persist});}catch(TargetInvocationException e){invalidMode=e.InnerException is ArgumentException;}
+        Assert(invalidMode && calls.Count==0,"Invalid mode values must have no side effects.");
+        calls.Clear();try{transition.Invoke(null,new object[]{"window","sidebar",apply,new Action<string>(value=>{calls.Add("save:"+value);throw new IOException("Fixture write failed");})});}catch(TargetInvocationException){}
+        Assert(String.Join(",",calls)=="apply:sidebar,save:sidebar,apply:window","A persistence failure must restore the preceding live mode.");
+        calls.Clear();try{transition.Invoke(null,new object[]{"window","sidebar",new Action<string>(value=>{calls.Add("apply:"+value);if(value=="sidebar")throw new InvalidOperationException("Fixture docking failed");}),persist});}catch(TargetInvocationException){}
+        Assert(String.Join(",",calls)=="apply:sidebar,apply:window","Failed docking must restore the previous mode without saving a false preference.");
+        var pane=assembly.GetType("SlidePilot.AiPane",true);var geometry=pane.GetMethod("WindowBounds",BindingFlags.Static|BindingFlags.NonPublic);
+        var aligned=(Rectangle)geometry.Invoke(null,new object[]{new Rectangle(900,100,480,600),new Rectangle(10,20,816,639),new Rectangle(0,0,800,600),new Point(18,51)});
+        Assert(aligned==new Rectangle(892,69,496,639),"Sidebar alignment must account for invisible nonclient margins.");
+        var borderless=(Rectangle)geometry.Invoke(null,new object[]{new Rectangle(-1280,80,480,700),new Rectangle(10,20,800,600),new Rectangle(0,0,800,600),new Point(10,20)});
+        Assert(borderless==new Rectangle(-1280,80,480,700),"Borderless and negative-monitor coordinates must remain intact.");
+        var sizing=assembly.GetType("SlidePilot.TaskPaneSizing",true);var initialWidth=sizing.GetMethod("InitialWidth",BindingFlags.Static|BindingFlags.NonPublic);
+        Assert((int)initialWidth.Invoke(null,new object[]{1069,120,240,400})==282,"A 1069px host at 125% DPI must cap its initial pane near 44%, using Office points.");
+        Assert((int)initialWidth.Invoke(null,new object[]{1069,120,240,240})==470,"Visible-pane measurement must account for Office reporting pixel-like units.");
+        bool noFallback=false;try{initialWidth.Invoke(null,new object[]{0,96,416,0});}catch(TargetInvocationException e){noFallback=e.InnerException is ArgumentOutOfRangeException;}
+        Assert(noFallback,"Zero-size observations must never fall back to a guessed width.");
+        Assert((int)initialWidth.Invoke(null,new object[]{600,96,240,320})==198,"Narrow hosts must retain at least 56% for presentation content.");
+        var sizingState=Activator.CreateInstance(sizing,true);var observe=sizing.GetMethod("Observe",BindingFlags.Instance|BindingFlags.NonPublic);calls.Clear();Action<int> resize=value=>calls.Add("resize:"+value);
+        Assert(!(bool)observe.Invoke(sizingState,new object[]{0,96,416,0,resize}) && calls.Count==0,"Incomplete native layout must not write a pane width.");
+        Assert(!(bool)observe.Invoke(sizingState,new object[]{1069,120,240,400,resize}) && calls.Count==0,"The first real layout observation must wait for a stable following tick.");
+        Assert((bool)observe.Invoke(sizingState,new object[]{1069,120,240,400,resize}) && String.Join(",",calls)=="resize:282","A stable, nonzero native layout must apply the initial width once.");
+        calls.Clear();Assert(!(bool)observe.Invoke(sizingState,new object[]{1069,120,300,500,resize}) && calls.Count==0,"Following ticks must preserve a user's changed width without applying again.");
+        Assert((bool)sizing.GetProperty("Applied",BindingFlags.Instance|BindingFlags.NonPublic).GetValue(sizingState,null) && (int)sizing.GetProperty("RequestedWidth",BindingFlags.Instance|BindingFlags.NonPublic).GetValue(sizingState,null)==282,"The initializer must retain its one-time applied value for readback diagnostics.");
         var icons=assembly.GetType("SlidePilot.RibbonIcons",true);var size=icons.GetMethod("SizeForDpi",BindingFlags.Static|BindingFlags.NonPublic);var draw=icons.GetMethod("Draw",BindingFlags.Static|BindingFlags.NonPublic);
         Assert((int)size.Invoke(null,new object[]{96})==32 && (int)size.Invoke(null,new object[]{144})==48 && (int)size.Invoke(null,new object[]{288})==96,"Icon sizes must track supported display scales.");
         int? previous=null;
@@ -67,6 +106,6 @@ class HostStateRegression {
             Assert(bitmap.Width==48 && bitmap.Height==48 && bitmap.GetPixel(0,0).A==0,"Rendered icon must retain size and transparent corners.");
             int pixel=bitmap.GetPixel(24,24).ToArgb();if(previous.HasValue)Assert(pixel!=previous.Value,"Each theme must produce a distinct palette.");previous=pixel;
         }
-        Console.WriteLine(checks+" host approval, state revision and icon checks passed.");return 0;
+        Console.WriteLine(checks+" host approval, workspace, window-mode and icon checks passed.");return 0;
     }
 }

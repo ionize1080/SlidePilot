@@ -2,7 +2,9 @@ using Microsoft.Win32;
 using System;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using System.Security.Principal;
+using System.Text;
 using SlidePilot;
 class MachineScopeTest {
     [DllImport("advapi32.dll")] static extern int RegOverridePredefKey(IntPtr key,IntPtr replacement);
@@ -18,9 +20,42 @@ class MachineScopeTest {
         Check(!Manager.SameCodebase(null,literal),"missing registration is not owned");
         Check(!Manager.SameCodebase(literal,literal+"?other"),"file URI query is not an ownership match");
     }
+    static string Hash(string path) {using(var sha=SHA256.Create())using(var file=File.OpenRead(path))return BitConverter.ToString(sha.ComputeHash(file)).Replace("-","").ToLowerInvariant();}
+    static string Manifest(string root) {
+        var text=new StringBuilder();
+        foreach(string file in Manager.RequiredFiles)text.Append(Hash(Path.Combine(root,file))).Append("  ").Append(file.Replace('\\','/')).Append('\n');
+        return text.ToString();
+    }
+    static void InvalidPackage(string root,string text,string name) {
+        File.WriteAllText(Path.Combine(root,"manifest.sha256"),text,new UTF8Encoding(false));
+        try{Manager.ValidatePackage(root);}catch(InvalidDataException){Check(true,name);return;}catch(IOException){Check(true,name);return;}
+        throw new Exception("Accepted invalid package: "+name);
+    }
+    static int CheckPackage() {
+        string root=Path.Combine(Path.GetTempPath(),"SlidePilot-package-QA-"+Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try {
+            foreach(string file in Manager.RequiredFiles) {string path=Path.Combine(root,file);Directory.CreateDirectory(Path.GetDirectoryName(path));File.WriteAllText(path,"QA placeholder: "+file);}
+            string valid=Manifest(root);string manifest=Path.Combine(root,"manifest.sha256");
+            File.WriteAllText(manifest,valid,new UTF8Encoding(false));
+            Check(Manager.ValidatePackage(root)==Manager.RequiredFiles.Length,"all listed files hash verified");
+            File.WriteAllText(Path.Combine(root,"unrelated-tool.exe"),"user file outside release inventory");
+            Check(Manager.ValidatePackage(root)==Manager.RequiredFiles.Length,"extra user files are permitted");
+            string first=valid.Substring(0,valid.IndexOf('\n')+1);
+            InvalidPackage(root,valid+first.ToUpperInvariant(),"case-insensitive duplicate path rejected");
+            InvalidPackage(root,valid+new string('0',64)+"  manifest.sha256\n","self-hash rejected");
+            foreach(string path in new[]{"../outside","/absolute","C:/absolute","a\\b","a//b","a/./b","NUL.txt","COM¹.exe","a. /b","a/b "})
+                InvalidPackage(root,new string('0',64)+"  "+path+"\n","unsafe path rejected: "+path);
+            InvalidPackage(root,valid.Substring(first.Length),"required file omitted from manifest rejected");
+            InvalidPackage(root,"bad manifest\n","invalid hash format rejected");
+            File.AppendAllText(Path.Combine(root,Manager.RequiredFiles[0]),"tampered");
+            InvalidPackage(root,valid,"changed payload rejected");
+            return 0;
+        } finally {Directory.Delete(root,true);}
+    }
     static int Main(string[] args) {
         if(args.Length!=1){Console.Error.WriteLine("deployment_scopes.exe <portable-bundle-folder>");return 2;}
-        try{CheckCodebase();return args[0]=="--paths"?0:Run(args[0]);}
+        try{CheckCodebase();return args[0]=="--paths"?0:args[0]=="--files"?CheckPackage():Run(args[0]);}
         catch(UnauthorizedAccessException e){Console.Error.WriteLine("Registry QA could not run in this environment: "+e.Message);return 3;}
         catch(Exception e){Console.Error.WriteLine(e);return 1;}
     }
@@ -40,12 +75,28 @@ class MachineScopeTest {
                 using(var key=machine.CreateSubKey(neighbor))key.SetValue("Marker","keep-machine");
                 var log=new StringWriter();
                 Check(Manager.Run("enable",root,log)==0,"enable user");
+                foreach(var view in Manager.Views)Check(Manager.RegistrationComplete(view,root,false),"both COM classes registered: "+view);
                 Check(Manager.HasUserOverride(),"detect user override");
                 Check(Manager.HasRollback(false),"persistent rollback created");
                 Check(Manager.Run("enable",root,log)==0,"enable idempotent");
                 Check(Manager.Run("rollback",root,log)==0,"rollback first install");
                 int behavior;Check(Manager.Registration(RegistryView.Registry64,out behavior)==null,"rollback returns disabled");
                 Check(Manager.Run("enable",root,log)==0,"enable after rollback");
+                // Recreate the three-key journal used before the task-pane class was added.
+                foreach(var view in Manager.Views)using(var registry=RegistryKey.OpenBaseKey(RegistryHive.CurrentUser,view)) {
+                    registry.DeleteSubKeyTree(@"Software\Classes\CLSID\"+Manager.PaneClassId,false);
+                    registry.DeleteSubKeyTree(@"Software\Classes\"+Manager.PaneProgId,false);
+                }
+                using(var journal=user.OpenSubKey(@"Software\SlidePilot\Deployment",true)) {
+                    journal.SetValue("Format",2);journal.DeleteValue("KeyCount",false);
+                    foreach(var view in Manager.Views)foreach(int index in new[]{3,4})journal.DeleteSubKeyTree(view+"-"+index,false);
+                }
+                Check(!Manager.RegistrationComplete(RegistryView.Registry64,root,false),"old release missing AiPane is incomplete");
+                Check(Manager.Run("enable",root,log)==0,"upgrade legacy deployment journal");
+                Check(Manager.Run("rollback",root,log)==0,"rollback upgrade restores legacy registration");
+                Check(Manager.Registration(RegistryView.Registry64,out behavior)==Manager.Codebase(root),"legacy Connect retained by upgrade rollback");
+                Check(!Manager.RegistrationComplete(RegistryView.Registry64,root,false),"upgrade rollback removes only new pane");
+                Check(Manager.Run("enable",root,log)==0,"enable complete registration after upgrade rollback");
                 Check(Manager.Run("disable",root,log)==0,"disable user");
                 Check(Manager.Run("disable",root,log)==0,"disable idempotent");
                 Check(Manager.Run("rollback",root,log)==0,"rollback repeated disable");
@@ -72,6 +123,12 @@ class MachineScopeTest {
                 Check(Manager.Run("enable",root,log)==1,"foreign CLSID is never overwritten");
                 using(var key=user.OpenSubKey(server))Check((string)key.GetValue("Class")=="Another.Component","foreign class preserved");
                 using(var key=user.CreateSubKey(server))key.SetValue("Class","SlidePilot.Connect");
+                string paneServer=@"Software\Classes\CLSID\"+Manager.PaneClassId+@"\InprocServer32";
+                using(var key=user.CreateSubKey(paneServer))key.SetValue("Class","Another.Component");
+                Check(Manager.Run("enable",root,log)==1,"foreign pane CLSID is never overwritten");
+                using(var key=user.CreateSubKey(paneServer)){key.SetValue("Class","SlidePilot.AiPane");key.SetValue("CodeBase",Manager.Codebase(Path.Combine(root,"other")));}
+                Check(Manager.Run("disable",root,log)==1,"disable protects pane registered by a different folder");
+                using(var key=user.CreateSubKey(paneServer))key.SetValue("CodeBase",Manager.Codebase(root));
                 using(var key=machine.CreateSubKey(server)){key.SetValue("Class","SlidePilot.Connect");key.SetValue("CodeBase",Manager.Codebase(root));}
                 Check(Manager.HasOtherScope(false),"detect machine conflict from user scope");
                 Check(Manager.Run("enable",root,log)==1,"user enable rejects machine conflict");

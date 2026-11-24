@@ -1,0 +1,23 @@
+/* Keep Office's compact task pane usable; standalone Chatbox is unchanged. */
+.sp-sidebar-setup{display:none}
+html[data-sp-mode="sidebar"],html[data-sp-mode="sidebar"] body,html[data-sp-mode="sidebar"] #root{height:100%;min-height:0;overflow:hidden}
+html[data-sp-mode="sidebar"] .App{height:100dvh;min-height:0;overflow:hidden}
+html[data-sp-mode="sidebar"] .sp-main-column{min-height:0;min-width:0;overflow:hidden}
+html[data-sp-mode="sidebar"] .sp-home-page,html[data-sp-mode="sidebar"] .sp-home,html[data-sp-mode="sidebar"] .sp-session-root{height:100%;min-height:0;overflow:hidden}
+html[data-sp-mode="sidebar"] .sp-home-page>.title-bar,html[data-sp-mode="sidebar"] .sp-session-root>.title-bar{flex:0 0 40px;min-height:40px}
+html[data-sp-mode="sidebar"] .sp-home-page>.sp-page-content{min-height:0;overflow:hidden;flex:1 1 0%}
+html[data-sp-mode="sidebar"] .sp-home-promotion{display:none}
+html[data-sp-mode="sidebar"] .sp-sidebar-setup{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:7px 10px;flex:0 0 auto;color:var(--chatbox-tint-secondary,#62716f);font-size:11px}
+html[data-sp-mode="sidebar"] .sp-sidebar-setup strong{font-weight:600;letter-spacing:.1px}
+html[data-sp-mode="sidebar"] .sp-sidebar-setup button{padding:3px 0;border:0;background:none;color:var(--chatbox-tint-brand,#00756e);font:inherit;cursor:pointer;white-space:nowrap}
+html[data-sp-mode="sidebar"] .sp-sidebar-setup button:focus-visible{outline:2px solid currentColor;outline-offset:2px;border-radius:3px}
+html[data-sp-mode="sidebar"] .sp-home-welcome{min-height:0;flex:1 1 0%;gap:6px;padding:8px;overflow:hidden}
+html[data-sp-mode="sidebar"] .sp-home-welcome>svg{width:26px;height:26px;flex-shrink:0}
+html[data-sp-mode="sidebar"] .sp-home-composer{margin-top:auto;min-height:0;flex:0 0 auto;gap:4px}
+html[data-sp-mode="sidebar"] .sp-home-copilot-picker{display:none}
+html[data-sp-mode="sidebar"] .sp-session-root>.sp-message-list{flex:1 1 0%;height:auto;min-height:0;overflow:hidden}
+html[data-sp-mode="sidebar"] .sp-composer{flex:0 0 auto;min-width:0;max-width:100%;padding:0 6px 6px!important;box-sizing:border-box}
+html[data-sp-mode="sidebar"] .sp-composer textarea{max-height:min(24vh,96px)!important;overflow-y:auto!important}
+html[data-sp-mode="sidebar"] .sp-input-tools{width:100%;min-width:0;flex-wrap:wrap}
+html[data-sp-mode="sidebar"] .sp-input-model{width:100%;min-width:0;justify-content:flex-end}
+@media(max-height:480px){html[data-sp-mode="sidebar"] .sp-home-welcome{display:none}html[data-sp-mode="sidebar"] .sp-home-composer{gap:0}html[data-sp-mode="sidebar"] .sp-composer textarea{max-height:72px!important}}

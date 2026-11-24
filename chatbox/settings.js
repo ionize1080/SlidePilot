@@ -1,8 +1,16 @@
 'use strict'
 const $ = id => document.getElementById(id)
-let theme = 0, busy = false, loaded = false
+let theme = 0, mode = 'window', busy = false, modeBusy = false, loaded = false, modeRequest = 0
 function status(text, error = false) { $('status').textContent = text; $('status').classList.toggle('error', error) }
 function palette() { document.querySelectorAll('[data-theme]').forEach(button => button.setAttribute('aria-pressed', String(Number(button.dataset.theme) === theme))) }
+function displayMode() { document.querySelectorAll('[data-mode]').forEach(button => { button.setAttribute('aria-pressed', String(button.dataset.mode === mode)); button.disabled = modeBusy || !loaded }) }
+async function refreshMode() {
+  if (!loaded || modeBusy) return
+  const request = ++modeRequest
+  try { const current = await window.slidepilotSettings.read(); if (!modeBusy && request === modeRequest && ['window','sidebar'].includes(current.mode)) { mode=current.mode; displayMode() } } catch { /* Preserve pending edits if PowerPoint is busy. */ }
+}
+window.slidepilotSettings.onRefresh(refreshMode)
+window.addEventListener('focus', refreshMode)
 document.querySelectorAll('[data-tab]').forEach(button => button.addEventListener('click', () => {
   document.querySelectorAll('[data-tab],main section').forEach(item => item.classList.remove('active'))
   document.querySelectorAll('[data-tab]').forEach(item => item.removeAttribute('aria-current'))
@@ -10,6 +18,18 @@ document.querySelectorAll('[data-tab]').forEach(button => button.addEventListene
 }))
 document.querySelectorAll('[data-theme]').forEach(button => button.addEventListener('click', () => {
   theme = Number(button.dataset.theme); palette(); if (loaded) status('配色已选择，保存后应用到 PowerPoint 工具栏。')
+}))
+document.querySelectorAll('[data-mode]').forEach(button => button.addEventListener('click', async () => {
+  if (!loaded || modeBusy || button.dataset.mode === mode) return
+  const requested = button.dataset.mode
+  modeRequest++
+  modeBusy = true; displayMode(); status('正在切换助手窗口…')
+  try {
+    const saved = await window.slidepilotSettings.write({ mode: requested })
+    mode = saved.mode || requested; displayMode()
+    status(mode === 'sidebar' ? '已切换为 PowerPoint 侧边栏，下次打开会沿用此方式。' : '已切换为独立窗口，下次打开会沿用此方式。')
+  } catch (error) { status('未能切换，保持原来的窗口方式。' + (error?.message ? ' ' + error.message : ''), true) }
+  finally { modeBusy = false; displayMode() }
 }))
 const colors = [ ['#26534a', '#23997d', '#c9eae0'], ['#2b4370', '#4671d6', '#d3dff9'], ['#313843', '#515e6f', '#d8dee4'] ]
 function svgNode(name, attrs) { const node = document.createElementNS('http://www.w3.org/2000/svg', name); for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, value); return node }
@@ -33,14 +53,14 @@ document.querySelectorAll('[data-theme]').forEach(button => {
 async function load() {
   try {
     const [host, workspace] = await Promise.all([window.slidepilotSettings.read(), window.slidepilotSettings.workspace()])
-    theme = host.theme; palette(); $('version').textContent = host.version; $('versionLabel').textContent = 'Version ' + host.version
+    theme = host.theme; mode = host.mode === 'sidebar' ? 'sidebar' : 'window'; palette(); $('version').textContent = host.version; $('versionLabel').textContent = 'Version ' + host.version
     $('office').textContent = host.office; $('workspaceLimit').value = workspace.maxFileMB; $('workspaceDepth').value = workspace.searchDepth
-    loaded = true; $('save').disabled = false; status('设置已就绪。')
+    loaded = true; displayMode(); $('save').disabled = false; status('设置已就绪。')
     requestAnimationFrame(() => window.slidepilotSettings.ready().catch(() => {}))
   } catch { status('无法读取设置。请保持 PowerPoint 打开，关闭审批对话框后重新打开设置。', true) }
 }
 $('save').addEventListener('click', async () => {
-  if (busy || !loaded) return
+  if (busy || modeBusy || !loaded) return
   const maxFileMB = Number($('workspaceLimit').value), searchDepth = Number($('workspaceDepth').value)
   if (!Number.isInteger(maxFileMB) || maxFileMB < 1 || maxFileMB > 1024 || !Number.isInteger(searchDepth) || searchDepth < 1 || searchDepth > 12) {
     status('请输入有效范围：文件上限 1–1024 MB，递归深度 1–12 层。', true); return

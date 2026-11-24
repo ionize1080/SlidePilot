@@ -69,7 +69,7 @@ namespace SlidePilot {
             sideFlow.Controls.Add(Label("SlidePilot",19,Color.White,true));
             sideFlow.Controls.Add(Label("FOR POWERPOINT",8,Color.FromArgb(157,184,195)));
             sideText=Label("",10,Color.FromArgb(202,219,226));sideText.MaximumSize=new Size(155,0);sideText.Margin=new Padding(0,32,0,0);sideFlow.Controls.Add(sideText);
-            var version=Label("0.1.0 RC2\nWindows · Portable",8,Color.FromArgb(157,184,195));version.Dock=DockStyle.Bottom;side.Controls.Add(version);
+            var version=Label("0.1.0 RC3\nWindows · Portable",8,Color.FromArgb(157,184,195));version.Dock=DockStyle.Bottom;side.Controls.Add(version);
 
             var content=new TableLayoutPanel{Dock=DockStyle.Fill,ColumnCount=1,RowCount=8,Padding=new Padding(28,25,28,18),Margin=Padding.Empty};
             for(int i=0;i<8;i++) content.RowStyles.Add(new RowStyle(i==5?SizeType.Percent:SizeType.AutoSize,i==5?100:0));
@@ -136,7 +136,19 @@ namespace SlidePilot {
             try {
                 var missing=Manager.MissingFiles(root);powerpoint=Manager.OfficePath("POWERPNT.EXE");excel=Manager.OfficePath("EXCEL.EXE");
                 registered=true;owned=false;foreign=false;bool failedLoad=false;var registration=new StringBuilder();
-                foreach(var view in Manager.Views) {int behavior;string path=Manager.Registration(view,out behavior,Machine);bool same=Manager.SameCodebase(path,Manager.Codebase(root));registered &= same && behavior==3;owned |= same;failedLoad |= same && behavior==2;foreign |= path!=null && !same;registration.AppendLine(view+": "+(path??"(disabled)")+"; LoadBehavior="+behavior);}
+                foreach(var view in Manager.Views) {
+                    int behavior;
+                    string path=Manager.Registration(view,out behavior,Machine);
+                    bool same=Manager.SameCodebase(path,Manager.Codebase(root));
+                    bool complete=Manager.RegistrationComplete(view,root,Machine);
+                    registered &= complete;
+                    owned |= same;
+                    failedLoad |= same && behavior==2;
+                    foreign |= path!=null && !same;
+                    registration.AppendLine(view+": "+(path??"(disabled)")+"; LoadBehavior="+behavior);
+                    if(same && behavior==3 && !complete)
+                        registration.AppendLine(T("侧栏或插件注册不完整。点击启用以修复当前安装。","Incomplete add-in or sidebar registration. Enable to repair this installation."));
+                }
                 ready=missing.Length==0 && powerpoint!=null;
                 checkValues[0].Text=powerpoint==null?T("未检测到桌面版 PowerPoint","Desktop PowerPoint not found"):T("已检测到桌面版","Desktop version detected");
                 checkValues[1].Text=missing.Length==0?T("完整 · 内置运行时已就绪","Complete · bundled runtimes ready"):T("缺少 ","Missing ")+missing.Length+T(" 项文件"," files");
@@ -150,7 +162,7 @@ namespace SlidePilot {
                 if(failedLoad){badge.Text=T("需要修复","REPAIR NEEDED");summary.Text=T("PowerPoint 上次未能加载插件","PowerPoint could not load the add-in");hint.Text=T("请先关闭 PowerPoint，再修复并重新打开。若仍失败，可查看日志中的启动原因。","Close PowerPoint, repair, then reopen it. If loading still fails, check the startup log.");}
                 if(HostHealth.IsLoaded(root)){badge.Text=T("功能区已加载","RIBBON LOADED");summary.Text=T("PowerPoint 已加载此版本的功能区","PowerPoint has loaded this version’s ribbon");}
                 if(writeLog) {
-                    details.Clear();Append("SlidePilot 0.1.0 RC2 · "+DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));Append("Scope: "+(Machine?"All users (HKLM)":"Current user (HKCU)")+"; Administrator: "+Manager.IsAdministrator());Append("Folder: "+root);Append("PowerPoint: "+(powerpoint??"not found"));Append("Excel: "+(excel??"not found"));Append(registration.ToString().TrimEnd());
+                    details.Clear();Append("SlidePilot 0.1.0 RC3 · "+DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));Append("Scope: "+(Machine?"All users (HKLM)":"Current user (HKCU)")+"; Administrator: "+Manager.IsAdministrator());Append("Folder: "+root);Append("PowerPoint: "+(powerpoint??"not found"));Append("Excel: "+(excel??"not found"));Append(registration.ToString().TrimEnd());
                     if(missing.Length>0)Append("Missing: "+String.Join(", ",missing));
                     if(Machine && Manager.HasUserOverride())Append(T("检测到当前账户的旧注册。若要迁移到整台电脑，请勾选“备份并替换”，再启用此版本。","A per-user registration exists. To migrate it, select Back up and replace, then enable this version."));
                     if(Manager.IsAdministrator())Append(T("当前安装器以管理员运行。请从开始菜单正常打开 PowerPoint；提升运行的 Office 可能不加载仅当前用户插件。","Setup is elevated. Open PowerPoint normally from Start; elevated Office may ignore per-user COM registration."));

@@ -44,10 +44,14 @@ async function main() {
   await reject(() => command({ sender: webContents, senderFrame: { url: mainFrame.url } }, 'read'), 'Child frames must be refused')
   await reject(() => command(event, 'write', { theme: 1.5 }), 'Fractional themes must be refused')
   await reject(() => command(event, 'write', { theme: 3 }), 'Unknown themes must be refused')
+  await reject(() => command(event, 'write', { mode: 'embedded' }), 'Unknown modes must be refused')
+  await reject(() => command(event, 'write', {}), 'Empty settings must be refused')
   await reject(() => command(event, 'open', { target: 'C:\\arbitrary.exe' }), 'Only fixed product locations may open')
   assert.equal(requests.length, 0); checks++
   await command(event, 'write', { theme: 2, apiKey: 'must-not-forward' })
   assert.deepEqual(requests.pop(), { theme: 2, action: 'settings_write', token: 'A'.repeat(64), uiToken: 'B'.repeat(64) }); checks++
+  await command(event, 'write', { mode: 'sidebar', apiKey: 'must-not-forward' })
+  assert.deepEqual(requests.pop(), { mode: 'sidebar', action: 'settings_write', token: 'A'.repeat(64), uiToken: 'B'.repeat(64) }); checks++
   await command(event, 'provider')
   assert.equal(requests.pop().action, 'settings_provider'); checks++
   assert.deepEqual(await preferences(event), settings); checks++
